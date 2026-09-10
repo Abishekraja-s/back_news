@@ -1,0 +1,39 @@
+{
+  "name": "great-india-news-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "seed": "node utils/seed.js",
+    "seed-matrimony": "node utils/seedMatrimony.js",
+    "fix-images": "node utils/fixImages.js",
+    "activate-ads": "node utils/activateAds.js",
+    "sync-features": "node utils/syncFeatures.js",
+    "update-article-media": "node utils/updateArticleMedia.js",
+    "backfill-google-news-slugs": "node utils/backfillGoogleNewsSlugs.js",
+    "repair-google-news": "node utils/repairGoogleNews.js",
+    "enrich-google-news": "node utils/enrichGoogleNews.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.0",
+    "express-validator": "^7.2.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.7.0",
+    "multer": "^1.4.5-lts.1",
+    "sanitize-html": "^2.13.0",
+    "sharp": "^0.33.5",
+    "slugify": "^1.6.6"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.2.0",
+    "nodemon": "^3.1.7"
+  }
+}

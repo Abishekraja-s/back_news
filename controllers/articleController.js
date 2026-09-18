@@ -11,9 +11,30 @@ const populateFields = [
   { path: 'author', select: 'name slug profileImage designation' },
 ];
 
-const publishedQuery = {
+/** Build published filter with current time (do not cache Date at startup). */
+const getPublishedQuery = () => ({
   status: ARTICLE_STATUS.PUBLISHED,
-  publishedAt: { $lte: new Date() },
+  $or: [
+    { publishedAt: { $lte: new Date() } },
+    { publishedAt: null },
+    { publishedAt: { $exists: false } },
+  ],
+});
+
+/** Ensure PUBLISHED articles always have a usable publishedAt */
+const applyPublishTimestamp = (data = {}, existing = null) => {
+  if (data.publishedAt === '' || data.publishedAt === undefined) {
+    delete data.publishedAt;
+  }
+  if (data.status !== ARTICLE_STATUS.PUBLISHED) return data;
+
+  const current = data.publishedAt || existing?.publishedAt;
+  const parsed = current ? new Date(current) : null;
+  const invalid = !parsed || Number.isNaN(parsed.getTime());
+  if (invalid) {
+    data.publishedAt = new Date();
+  }
+  return data;
 };
 
 export const getArticles = async (req, res, next) => {
@@ -27,7 +48,7 @@ export const getArticles = async (req, res, next) => {
     if (req.query.district) query.district = req.query.district;
 
     if (!req.user) {
-      Object.assign(query, publishedQuery);
+      Object.assign(query, getPublishedQuery());
     }
 
     const [articles, total] = await Promise.all([
@@ -54,7 +75,7 @@ export const getArticleBySlug = async (req, res, next) => {
   try {
     const article = await Article.findOne({
       slug: req.params.slug,
-      ...publishedQuery,
+      ...getPublishedQuery(),
     }).populate(populateFields);
 
     if (!article) {
@@ -85,7 +106,7 @@ export const getArticleById = async (req, res, next) => {
 export const getLatest = async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 10, 30);
-    const articles = await Article.find(publishedQuery)
+    const articles = await Article.find(getPublishedQuery())
       .populate(populateFields)
       .sort({ publishedAt: -1 })
       .limit(limit)
@@ -100,7 +121,7 @@ export const getLatest = async (req, res, next) => {
 
 export const getFeatured = async (req, res, next) => {
   try {
-    const articles = await Article.find({ ...publishedQuery, isFeatured: true })
+    const articles = await Article.find({ ...getPublishedQuery(), isFeatured: true })
       .populate(populateFields)
       .sort({ publishedAt: -1 })
       .limit(5)
@@ -115,7 +136,7 @@ export const getFeatured = async (req, res, next) => {
 export const getMustWatch = async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 8, 20);
-    const articles = await Article.find({ ...publishedQuery, isMustWatch: true })
+    const articles = await Article.find({ ...getPublishedQuery(), isMustWatch: true })
       .populate(populateFields)
       .sort({ publishedAt: -1 })
       .limit(limit)
@@ -131,10 +152,11 @@ export const getPopular = async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 10, 30);
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const now = new Date();
 
     const articles = await Article.find({
-      ...publishedQuery,
-      publishedAt: { $gte: sevenDaysAgo },
+      status: ARTICLE_STATUS.PUBLISHED,
+      publishedAt: { $gte: sevenDaysAgo, $lte: now },
     })
       .populate(populateFields)
       .sort({ views: -1 })
@@ -158,7 +180,7 @@ export const getByCategory = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Category not found' });
     }
 
-    const query = { ...publishedQuery, category: category._id };
+    const query = { ...getPublishedQuery(), category: category._id };
     const [articles, total] = await Promise.all([
       Article.find(query).populate(populateFields).sort({ publishedAt: -1 }).skip(skip).limit(limit).lean(),
       Article.countDocuments(query),
@@ -185,7 +207,7 @@ export const getByDistrict = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'District not found' });
     }
 
-    const query = { ...publishedQuery, district: district._id };
+    const query = { ...getPublishedQuery(), district: district._id };
     const [articles, total] = await Promise.all([
       Article.find(query).populate(populateFields).sort({ publishedAt: -1 }).skip(skip).limit(limit).lean(),
       Article.countDocuments(query),
@@ -212,7 +234,7 @@ export const searchArticles = async (req, res, next) => {
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
 
     const query = {
-      ...publishedQuery,
+      ...getPublishedQuery(),
       $text: { $search: q },
     };
 
@@ -245,7 +267,7 @@ export const getRelated = async (req, res, next) => {
     }
 
     const related = await Article.find({
-      ...publishedQuery,
+      ...getPublishedQuery(),
       _id: { $ne: article._id },
       category: article.category,
     })
@@ -262,7 +284,7 @@ export const getRelated = async (req, res, next) => {
 
 export const createArticle = async (req, res, next) => {
   try {
-    const data = { ...req.body, createdBy: req.user._id };
+    const data = applyPublishTimestamp({ ...req.body, createdBy: req.user._id });
     data.content = sanitizeContent(data.content);
     data.slug = data.slug || (await generateSlug(data.title));
 
@@ -290,11 +312,11 @@ export const updateArticle = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
-    const data = { ...req.body };
+    const data = applyPublishTimestamp({ ...req.body }, article);
     if (data.content) data.content = sanitizeContent(data.content);
     if (data.title && !data.slug) data.slug = await generateSlug(data.title, req.params.id);
 
-    if (data.status === ARTICLE_STATUS.PUBLISHED && !article.publishedAt) {
+    if (data.status === ARTICLE_STATUS.PUBLISHED && !data.publishedAt && !article.publishedAt) {
       data.publishedAt = new Date();
     }
 
@@ -430,3 +452,4 @@ export const getDashboardStats = async (req, res, next) => {
     next(error);
   }
 };
+

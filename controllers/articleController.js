@@ -317,15 +317,20 @@ export const deleteArticle = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Article not found' });
     }
 
-    if (req.query.permanent === 'true') {
-      await article.deleteOne();
-    } else {
-      article.status = ARTICLE_STATUS.TRASH;
-      await article.save();
+    const permanent =
+      req.query.permanent === 'true' || article.status === ARTICLE_STATUS.TRASH;
+
+    if (permanent) {
+      await Article.findByIdAndDelete(req.params.id);
+      invalidateRssCache();
+      return res.json({ success: true, message: 'Article permanently deleted' });
     }
 
+    await Article.findByIdAndUpdate(req.params.id, {
+      status: ARTICLE_STATUS.TRASH,
+    });
     invalidateRssCache();
-    res.json({ success: true, message: 'Article deleted' });
+    res.json({ success: true, message: 'Article moved to trash' });
   } catch (error) {
     next(error);
   }

@@ -39,7 +39,7 @@ router.get('/', protect, authorize(...writers), getArticles);
 router.get('/:id', protect, authorize(...writers), getArticleById);
 router.post('/', protect, authorize(...writers), createArticle);
 router.put('/:id', protect, authorize(...writers), updateArticle);
-router.delete('/:id', protect, authorize(...editors), deleteArticle);
+router.delete('/:id', protect, authorize(...writers), deleteArticle);
 router.post('/:id/live-updates', protect, authorize(...editors), addLiveUpdate);
 
 export default router;

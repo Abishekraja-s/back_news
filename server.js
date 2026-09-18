@@ -40,6 +40,8 @@ import { startGoogleNewsFetchJob } from './jobs/googleNewsFetchJob.js';
 import { startTravelFetchJob } from './jobs/travelFetchJob.js';
 import { startSportsFetchJob } from './jobs/sportsFetchJob.js';
 import { startGovernmentFetchJob } from './jobs/governmentFetchJob.js';
+import { startRssIngestJob } from './jobs/rssIngestJob.js';
+import rssIngestRoutes from './routes/rssIngestRoutes.js';
 
 dotenv.config();
 
@@ -134,6 +136,7 @@ app.use('/api/adsense', adSenseRoutes);
 app.use('/api/travel-notifications', travelNotificationRoutes);
 app.use('/api/sports', sportsRoutes);
 app.use('/api/government-notifications', governmentNotificationRoutes);
+app.use('/api/rss-ingest', rssIngestRoutes);
 app.use('/api/matrimony', matrimonyRoutes);
 app.use('/api/pages', pageContentRoutes);
 app.use('/', seoRoutes);
@@ -176,6 +179,7 @@ const startServer = async () => {
     startTravelFetchJob();
     startSportsFetchJob();
     startGovernmentFetchJob();
+    startRssIngestJob();
   }).on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`Port ${PORT} is already in use. Close the other process or change PORT in .env`);

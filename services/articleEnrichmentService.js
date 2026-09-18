@@ -92,13 +92,22 @@ const extractArticleBody = (html) => {
   const regionPatterns = [
     /<div[^>]+itemprop=["']articleBody["'][^>]*>([\s\S]*?)<\/div>/i,
     /<div[^>]+class=["'][^"']*ins_storybody[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+class=["'][^"']*Story_story__[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
     /<div[^>]+class=["'][^"']*story[_-]?detail[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
     /<div[^>]+class=["'][^"']*story[_-]?body[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+class=["'][^"']*story[_-]?content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+class=["'][^"']*article[_-]?body[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+class=["'][^"']*article[_-]?content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
     /<div[^>]+class=["'][^"']*content[_-]?text[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+class=["'][^"']*Normal[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+class=["'][^"']*articlebodycontent[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+data-component=["']text-block["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<section[^>]+class=["'][^"']*article[_-]?body[^"']*["'][^>]*>([\s\S]*?)<\/section>/i,
     /<article[\s\S]*?<\/article>/i,
     /<main[\s\S]*?<\/main>/i,
   ];
 
+  let best = '';
   for (const pattern of regionPatterns) {
     const match = safeHtml.match(pattern);
     if (!match) continue;
@@ -106,18 +115,19 @@ const extractArticleBody = (html) => {
     const paragraphs = extractParagraphsFromHtml(region);
     if (paragraphs.length >= 2) {
       const full = paragraphsToFullText(paragraphs);
-      if (!isJunkArticleContent(full)) return full;
+      if (!isJunkArticleContent(full) && full.length > best.length) best = full;
     }
   }
+  if (best.length >= 200) return best;
 
-  // Fallback: all <p> tags on page (filtered)
+  // Fallback: all <p> tags on page (filtered) — keep a long article body
   const allParagraphs = extractParagraphsFromHtml(safeHtml);
   if (allParagraphs.length >= 2) {
-    const full = paragraphsToFullText(allParagraphs.slice(0, 30));
+    const full = paragraphsToFullText(allParagraphs.slice(0, 80));
     if (!isJunkArticleContent(full)) return full;
   }
 
-  return '';
+  return best;
 };
 
 const pickImage = (html) => {
@@ -200,7 +210,14 @@ export const enrichArticleFromUrl = async (url) => {
   }
 };
 
-export const enrichRssItem = async (item) => {
+/**
+ * @param {object} item
+ * @param {{ forceFullContent?: boolean }} [options]
+ *   forceFullContent: always scrape publisher page for the long article body
+ *   (RSS description is usually only a short blurb).
+ */
+export const enrichRssItem = async (item, options = {}) => {
+  const forceFullContent = options.forceFullContent === true;
   const enriched = { ...item };
 
   if (isGenericGoogleImage(enriched.image)) enriched.image = '';
@@ -212,19 +229,25 @@ export const enrichRssItem = async (item) => {
     }
   }
 
+  const existingBody = String(enriched.content || enriched.description || '').trim();
+  const existingLen = existingBody.length;
+
   const needsImage = !isValidImageUrl(enriched.image) || isGenericGoogleImage(enriched.image);
+  // RSS blurbs are often 150–600 chars — still not a full story. Require a long body
+  // unless forceFullContent (RSS ingest) which always scrapes the article page.
   const needsContent =
+    forceFullContent ||
     isGenericGoogleDescription(enriched.content) ||
     isGenericGoogleDescription(enriched.description) ||
     isJunkArticleContent(enriched.content) ||
     isJunkArticleContent(enriched.description) ||
-    (enriched.content || enriched.description || '').length < 120;
+    existingLen < (forceFullContent ? 2500 : 400);
 
   if (!needsImage && !needsContent) {
     return { ...enriched, ...prepareGoogleNewsTextFields(enriched) };
   }
 
-  await sleep(400);
+  await sleep(forceFullContent ? 250 : 400);
   const meta = await enrichArticleFromUrl(enriched.link);
   if (!meta) {
     return { ...enriched, ...prepareGoogleNewsTextFields(enriched) };
@@ -234,18 +257,35 @@ export const enrichRssItem = async (item) => {
   if (meta.resolvedUrl && !isGoogleNewsWrapper(meta.resolvedUrl)) {
     enriched.sourceUrl = enriched.sourceUrl || meta.resolvedUrl;
   }
-  if (needsContent && meta.content) {
-    enriched.content = meta.content;
-    if (!enriched.description || enriched.description.length < (meta.description?.length || 0)) {
-      enriched.description = meta.description || meta.content;
+
+  const metaContent = String(meta.content || '').trim();
+  const metaDesc = String(meta.description || '').trim();
+
+  // Prefer the longest readable body from the publisher page
+  if (metaContent && metaContent.length > existingLen) {
+    enriched.content = metaContent;
+  }
+
+  // Keep description short for excerpts — do not dump the full article into it
+  if (metaDesc && !isGenericGoogleDescription(metaDesc)) {
+    if (
+      !enriched.description ||
+      isGenericGoogleDescription(enriched.description) ||
+      enriched.description.length < 40
+    ) {
+      enriched.description = metaDesc;
     }
-  } else if (
-    meta.description &&
-    !isGenericGoogleDescription(meta.description) &&
-    (isGenericGoogleDescription(enriched.description) || enriched.description.length < meta.description.length)
+  } else if ((!enriched.description || enriched.description.length < 40) && enriched.content) {
+    enriched.description = enriched.content.slice(0, 280);
+  }
+
+  // If we still only have a short blurb, use meta description as content fallback
+  if (
+    (!enriched.content || enriched.content.length < 120) &&
+    metaDesc &&
+    !isGenericGoogleDescription(metaDesc)
   ) {
-    enriched.description = meta.description;
-    enriched.content = enriched.content || meta.description;
+    enriched.content = metaDesc;
   }
 
   return { ...enriched, ...prepareGoogleNewsTextFields(enriched) };

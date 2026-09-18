@@ -19,6 +19,7 @@ export const ADMIN_PAGES = [
   { key: 'youtube-slider', label: 'YouTube Slider', path: '/admin/youtube-slider' },
   { key: 'instagram-posts', label: 'Instagram Posts', path: '/admin/instagram-posts' },
   { key: 'google-news', label: 'Google News', path: '/admin/google-news' },
+  { key: 'rss-feed', label: 'RSS Feed', path: '/admin/rss-feed' },
   { key: 'travel-notifications', label: 'Travel Notifications', path: '/admin/travel-notifications' },
   { key: 'sports-live', label: 'Sports Live Updates', path: '/admin/sports-live' },
   { key: 'government-notifications', label: 'Government Notifications', path: '/admin/government-notifications' },

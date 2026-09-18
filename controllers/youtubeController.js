@@ -27,10 +27,16 @@ export const syncChannel = async (channel, { triggeredBy = 'cron' } = {}) => {
       throw Object.assign(new Error('Configure a YouTube channel URL first'), { statusCode: 400 });
     }
 
-    if (!channel.channelId) {
-      const resolved = await resolveChannelId(channel.channelUrl || channel.channelId);
-      channel.channelId = resolved.channelId;
-      if (resolved.channelHandle) channel.channelHandle = resolved.channelHandle;
+    // Re-resolve from URL on every sync so @handles stay correct
+    if (channel.channelUrl) {
+      try {
+        const resolved = await resolveChannelId(channel.channelUrl);
+        channel.channelId = resolved.channelId;
+        if (resolved.channelHandle) channel.channelHandle = resolved.channelHandle;
+      } catch (resolveErr) {
+        if (!channel.channelId) throw resolveErr;
+        console.warn('[YouTube] resolve failed, using stored channelId:', resolveErr.message);
+      }
     }
 
     const max = channel.maxVideos || 15;
@@ -197,14 +203,18 @@ export const updateChannelSettings = async (req, res, next) => {
       sliderTitleTamil,
     } = req.body;
 
-    if (typeof channelUrl === 'string' && channelUrl.trim() && channelUrl.trim() !== channel.channelUrl) {
-      channel.channelUrl = channelUrl.trim();
-      try {
-        const resolved = await resolveChannelId(channel.channelUrl);
-        channel.channelId = resolved.channelId;
-        channel.channelHandle = resolved.channelHandle || channel.channelHandle;
-      } catch (err) {
-        return res.status(err.statusCode || 400).json({ success: false, message: err.message });
+    if (typeof channelUrl === 'string' && channelUrl.trim()) {
+      const nextUrl = channelUrl.trim();
+      const urlChanged = nextUrl !== channel.channelUrl;
+      channel.channelUrl = nextUrl;
+      if (urlChanged || !channel.channelId) {
+        try {
+          const resolved = await resolveChannelId(channel.channelUrl);
+          channel.channelId = resolved.channelId;
+          channel.channelHandle = resolved.channelHandle || channel.channelHandle;
+        } catch (err) {
+          return res.status(err.statusCode || 400).json({ success: false, message: err.message });
+        }
       }
     }
 

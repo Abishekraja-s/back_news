@@ -60,11 +60,17 @@ const articleSchema = new mongoose.Schema(
     audioReader: { type: String, default: '' },
     youtubeVideoLink: { type: String, default: '' },
     liveUpdates: [liveUpdateSchema],
+    /** External import metadata (RSS, etc.) */
+    sourceUrl: { type: String, default: '' },
+    importSource: { type: String, default: '', index: true },
+    importGuid: { type: String, default: '', index: true },
+    rssFeed: { type: mongoose.Schema.Types.ObjectId, ref: 'RssFeedSource' },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
 );
 
+articleSchema.index({ importSource: 1, importGuid: 1 });
 articleSchema.index({ status: 1, publishedAt: -1 });
 articleSchema.index({ category: 1, status: 1, publishedAt: -1 });
 articleSchema.index({ author: 1 });

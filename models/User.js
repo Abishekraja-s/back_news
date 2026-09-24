@@ -18,6 +18,8 @@ const userSchema = new mongoose.Schema(
     city: { type: String, default: '', trim: true },
     status: { type: String, enum: ['active', 'inactive', 'suspended'], default: 'active' },
     refreshToken: { type: String, select: false },
+    passwordResetToken: { type: String, select: false },
+    passwordResetExpires: { type: Date, select: false },
     lastLogin: Date,
   },
   { timestamps: true }

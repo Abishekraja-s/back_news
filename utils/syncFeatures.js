@@ -49,6 +49,28 @@ export const syncFeatures = async ({ seedDemo = true } = {}) => {
   await SiteFeature.updateOne({ key: 'jobs' }, { $set: { enabled: false, status: 'disabled' } });
   await FeatureItem.updateMany({ featureKey: 'jobs' }, { $set: { isActive: false } });
 
+  // Point Daily Dose horoscope card to Astrology module (replace old Tamil label)
+  await FeatureItem.updateMany(
+    {
+      featureKey: 'daily_dose',
+      $or: [
+        { 'meta.slug': 'horoscope' },
+        { 'meta.slug': 'astrology' },
+        { title: 'Horoscope' },
+        { titleTamil: /ராசி/ },
+      ],
+    },
+    {
+      $set: {
+        title: 'Astrology',
+        titleTamil: 'ராசி பலன்',
+        link: '/astrology',
+        meta: { slug: 'astrology' },
+        isActive: true,
+      },
+    }
+  );
+
   let demoCreated = 0;
   if (seedDemo) {
     const count = await FeatureItem.countDocuments();

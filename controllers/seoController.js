@@ -23,7 +23,12 @@ export const getSitemap = async (req, res, next) => {
 
     const staticPages = [
       '', 'about', 'contact', 'privacy-policy', 'terms', 'editorial-policy',
-      'correction-policy', 'copyright', 'grievance',
+      'correction-policy', 'copyright', 'grievance', 'disclaimer', 'gdpr-privacy-policy',
+      'astrology',
+      'astrology/rasi/mesham', 'astrology/rasi/rishabam', 'astrology/rasi/mithunam',
+      'astrology/rasi/kadagam', 'astrology/rasi/simmam', 'astrology/rasi/kanni',
+      'astrology/rasi/thulam', 'astrology/rasi/viruchigam', 'astrology/rasi/dhanusu',
+      'astrology/rasi/magaram', 'astrology/rasi/kumbam', 'astrology/rasi/meenam',
       'india', 'world', 'politics', 'business', 'sports', 'cinema',
       'technology', 'education', 'jobs', 'spiritual', 'special', 'tamil-nadu',
     ];

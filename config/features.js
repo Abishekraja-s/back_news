@@ -402,12 +402,12 @@ export const DEMO_FEATURE_ITEMS = [
   {
     featureKey: 'daily_dose',
     itemType: 'daily_link',
-    title: 'Horoscope',
-    titleTamil: 'இன்றைய ராசிபலன்',
+    title: 'Astrology',
+    titleTamil: 'ராசி பலன்',
     icon: 'star',
     color: '#7c3aed',
-    link: '/explore/daily_dose',
-    meta: { slug: 'horoscope' },
+    link: '/astrology',
+    meta: { slug: 'astrology' },
     priority: 10,
   },
   {

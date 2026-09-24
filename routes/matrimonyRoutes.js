@@ -27,6 +27,7 @@ import {
   getMySubmittedEnquiries,
   getReceivedEnquiries,
   updateReceivedEnquiry,
+  deleteMyEnquiry,
   getAdminProfileEnquiries,
   updateAdminEnquiry,
 } from '../controllers/matrimonyController.js';
@@ -105,6 +106,7 @@ router.delete('/member/profile', protect, authorize(ROLES.MATRIMONY), deleteMyPr
 router.get('/member/enquiries', protect, authorize(ROLES.MATRIMONY), getMySubmittedEnquiries);
 router.get('/member/enquiries/received', protect, authorize(ROLES.MATRIMONY), getReceivedEnquiries);
 router.put('/member/enquiries/:id', protect, authorize(ROLES.MATRIMONY), updateReceivedEnquiry);
+router.delete('/member/enquiries/:id', protect, authorize(ROLES.MATRIMONY), deleteMyEnquiry);
 
 router.post(
   '/member/upload',

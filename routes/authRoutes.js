@@ -1,5 +1,14 @@
 import express from 'express';
-import { login, logout, getMe, refreshToken, updateProfile, changePassword } from '../controllers/authController.js';
+import {
+  login,
+  logout,
+  getMe,
+  refreshToken,
+  updateProfile,
+  changePassword,
+  forgotPassword,
+  resetPassword,
+} from '../controllers/authController.js';
 import { protect } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { body } from 'express-validator';
@@ -14,6 +23,21 @@ router.post(
 );
 router.post('/logout', logout);
 router.post('/refresh', refreshToken);
+router.post(
+  '/forgot-password',
+  [body('email').isEmail().withMessage('Valid email is required')],
+  validate,
+  forgotPassword
+);
+router.post(
+  '/reset-password',
+  [
+    body('token').notEmpty().withMessage('Reset token is required'),
+    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  ],
+  validate,
+  resetPassword
+);
 router.get('/me', protect, getMe);
 router.put(
   '/profile',

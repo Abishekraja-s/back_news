@@ -35,6 +35,14 @@ const DEFAULT_SETTINGS = {
   analyticsEnabled: true,
   searchConsoleVerification: '',
   commentsEnabled: true,
+  smtpEnabled: false,
+  smtpHost: '',
+  smtpPort: 587,
+  smtpSecure: false,
+  smtpUser: '',
+  smtpPassword: '',
+  smtpFromName: 'The Great India News',
+  smtpFromEmail: '',
 };
 
 export const normalizeBrandAsset = (value) => {
@@ -85,6 +93,12 @@ const buildSettingsResult = (stored = []) => {
     result.analyticsEnabled = Boolean(result.analyticsEnabled);
   }
 
+  result.smtpEnabled = result.smtpEnabled === true || result.smtpEnabled === 'true';
+  result.smtpSecure = result.smtpSecure === true || result.smtpSecure === 'true';
+  result.smtpPort = Number(result.smtpPort) || 587;
+  result.smtpPasswordSet = Boolean(result.smtpPassword);
+  delete result.smtpPassword;
+
   return result;
 };
 
@@ -117,12 +131,35 @@ export const updateSettings = async (req, res, next) => {
     if (Object.prototype.hasOwnProperty.call(updates, 'analyticsEnabled')) {
       updates.analyticsEnabled = Boolean(updates.analyticsEnabled);
     }
+    if (Object.prototype.hasOwnProperty.call(updates, 'smtpEnabled')) {
+      updates.smtpEnabled = Boolean(updates.smtpEnabled);
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, 'smtpSecure')) {
+      updates.smtpSecure = Boolean(updates.smtpSecure);
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, 'smtpPort')) {
+      updates.smtpPort = Number(updates.smtpPort) || 587;
+    }
+
+    // Keep existing password when admin leaves the field blank
+    if (
+      Object.prototype.hasOwnProperty.call(updates, 'smtpPassword')
+      && String(updates.smtpPassword || '').trim() === ''
+    ) {
+      delete updates.smtpPassword;
+    }
+    delete updates.smtpPasswordSet;
 
     for (const [key, value] of Object.entries(updates)) {
       if (BRAND_SETTING_KEYS.includes(key)) continue;
+      const group = key.startsWith('smtp')
+        ? 'email'
+        : key.startsWith('google') || key === 'analyticsEnabled'
+          ? 'analytics'
+          : 'general';
       await Setting.findOneAndUpdate(
         { key },
-        { key, value, group: key.startsWith('google') || key === 'analyticsEnabled' ? 'analytics' : 'general' },
+        { key, value, group },
         { upsert: true, new: true }
       );
     }

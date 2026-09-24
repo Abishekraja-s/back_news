@@ -10,7 +10,7 @@ const marketplaceProductSchema = new mongoose.Schema(
     location: { type: String, default: '', trim: true },
     image: { type: String, default: '' },
     images: [{ type: String }],
-    category: { type: String, default: 'General', trim: true },
+    category: { type: String, default: 'Electronics', trim: true },
     condition: {
       type: String,
       enum: ['new', 'like_new', 'good', 'fair', 'used'],
@@ -19,7 +19,7 @@ const marketplaceProductSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: Object.values(MARKETPLACE_PRODUCT_STATUS),
-      default: MARKETPLACE_PRODUCT_STATUS.PENDING,
+      default: MARKETPLACE_PRODUCT_STATUS.APPROVED,
       index: true,
     },
     rejectionReason: { type: String, default: '' },

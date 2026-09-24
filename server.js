@@ -42,6 +42,9 @@ import { startSportsFetchJob } from './jobs/sportsFetchJob.js';
 import { startGovernmentFetchJob } from './jobs/governmentFetchJob.js';
 import { startRssIngestJob } from './jobs/rssIngestJob.js';
 import rssIngestRoutes from './routes/rssIngestRoutes.js';
+import shareRoutes from './routes/shareRoutes.js';
+import astrologyRoutes from './routes/astrologyRoutes.js';
+import { startAstrologySyncJob } from './jobs/astrologySyncJob.js';
 
 dotenv.config();
 
@@ -105,6 +108,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   etag: true,
   lastModified: true,
   setHeaders(res, filePath) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     if (filePath.endsWith('.mp4')) {
       res.setHeader('Content-Type', 'video/mp4');
       res.setHeader('Accept-Ranges', 'bytes');
@@ -138,7 +143,10 @@ app.use('/api/sports', sportsRoutes);
 app.use('/api/government-notifications', governmentNotificationRoutes);
 app.use('/api/rss-ingest', rssIngestRoutes);
 app.use('/api/matrimony', matrimonyRoutes);
+app.use('/api/astrology', astrologyRoutes);
 app.use('/api/pages', pageContentRoutes);
+app.use('/share', shareRoutes);
+app.use('/api/share', shareRoutes);
 app.use('/', seoRoutes);
 
 app.get('/api/health', (req, res) => {
@@ -171,6 +179,16 @@ const startServer = async () => {
     console.warn('Feature sync skipped:', err.message);
   }
 
+  try {
+    const { seedMarketplaceCategories } = await import('./controllers/marketplaceCategoryController.js');
+    const catSeed = await seedMarketplaceCategories();
+    if (catSeed.created) {
+      console.log(`Marketplace categories seeded — created: ${catSeed.created}`);
+    }
+  } catch (err) {
+    console.warn('Marketplace category seed skipped:', err.message);
+  }
+
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`API: http://localhost:${PORT}/api/health`);
@@ -180,6 +198,7 @@ const startServer = async () => {
     startSportsFetchJob();
     startGovernmentFetchJob();
     startRssIngestJob();
+    startAstrologySyncJob();
   }).on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`Port ${PORT} is already in use. Close the other process or change PORT in .env`);

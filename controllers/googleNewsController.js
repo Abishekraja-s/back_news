@@ -417,6 +417,68 @@ export const deleteItem = async (req, res, next) => {
   }
 };
 
+const buildCreatedAtFilter = (from, to) => {
+  const createdAt = {};
+  if (from) {
+    const start = new Date(`${String(from).slice(0, 10)}T00:00:00.000`);
+    if (!Number.isNaN(start.getTime())) createdAt.$gte = start;
+  }
+  if (to) {
+    const end = new Date(`${String(to).slice(0, 10)}T23:59:59.999`);
+    if (!Number.isNaN(end.getTime())) createdAt.$lte = end;
+  }
+  return Object.keys(createdAt).length ? { createdAt } : null;
+};
+
+/** Admin: delete items created within a date range (optional status filter) */
+export const deleteItemsByDate = async (req, res, next) => {
+  try {
+    const { from, to, status, dryRun } = req.body || {};
+    if (!from && !to) {
+      return res.status(400).json({
+        success: false,
+        message: 'Provide from and/or to date (YYYY-MM-DD)',
+      });
+    }
+
+    const dateFilter = buildCreatedAtFilter(from, to);
+    if (!dateFilter) {
+      return res.status(400).json({ success: false, message: 'Invalid date range' });
+    }
+
+    const filter = { ...dateFilter };
+    if (status && status !== 'all' && ['pending', 'published', 'rejected', 'draft'].includes(status)) {
+      filter.status = status;
+    }
+
+    const count = await GoogleNewsItem.countDocuments(filter);
+    if (dryRun) {
+      return res.json({
+        success: true,
+        data: { count, filter: { from: from || null, to: to || null, status: status || null } },
+        message: `${count} items match`,
+      });
+    }
+
+    if (!count) {
+      return res.json({
+        success: true,
+        message: 'No items matched that date range',
+        data: { deleted: 0 },
+      });
+    }
+
+    const result = await GoogleNewsItem.deleteMany(filter);
+    res.json({
+      success: true,
+      message: `Deleted ${result.deletedCount} item(s)`,
+      data: { deleted: result.deletedCount },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getPublicItems = async (req, res, next) => {
   try {
     const config = await getOrCreateConfig();

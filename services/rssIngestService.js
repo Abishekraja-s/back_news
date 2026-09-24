@@ -174,12 +174,60 @@ export const parseFeedItems = (xml = '', feedUrl = '') => {
   return items;
 };
 
-export const fetchFeedXml = async (url) => {
+const isFeedXml = (text = '') =>
+  /<\s*rss[\s>]|<\s*feed[\s>]|<\s*rdf:RDF/i.test(text);
+
+const isHtmlDocument = (text = '') =>
+  /<\s*html[\s>]/i.test(text) && !isFeedXml(text);
+
+/** Find RSS/Atom URLs advertised in an HTML page (<link rel="alternate" ...>). */
+export const discoverFeedUrlsFromHtml = (html, pageUrl) => {
+  const found = [];
+  const linkRe = /<link\b[^>]*>/gi;
+  let m;
+  while ((m = linkRe.exec(html))) {
+    const tag = m[0];
+    const type = (tag.match(/\btype=["']([^"']+)["']/i) || [])[1] || '';
+    const rel = (tag.match(/\brel=["']([^"']+)["']/i) || [])[1] || '';
+    const href = (tag.match(/\bhref=["']([^"']+)["']/i) || [])[1] || '';
+    if (!href) continue;
+    const isFeedType = /application\/(rss|atom)\+xml/i.test(type) || /rss|atom/i.test(type);
+    const isAlternate = /\balternate\b/i.test(rel);
+    if (isFeedType || (isAlternate && /feed|rss|atom/i.test(href))) {
+      const abs = toAbsoluteUrl(href, pageUrl);
+      if (abs && !found.includes(abs)) found.push(abs);
+    }
+  }
+  return found;
+};
+
+const candidateFeedUrls = (pageUrl) => {
+  try {
+    const u = new URL(pageUrl);
+    const origin = u.origin;
+    const path = u.pathname.replace(/\/+$/, '') || '';
+    return [
+      `${origin}/feedapi/latest-news/`,
+      `${origin}/feed/`,
+      `${origin}/feed`,
+      `${origin}/rss`,
+      `${origin}/rss.xml`,
+      `${origin}/atom.xml`,
+      `${origin}/index.xml`,
+      `${origin}/?feed=rss2`,
+      path ? `${origin}${path}/feed/` : null,
+    ].filter(Boolean);
+  } catch {
+    return [];
+  }
+};
+
+const fetchUrlText = async (url) => {
   const res = await fetch(url, {
     headers: {
       'User-Agent':
-        'Mozilla/5.0 (compatible; GreatIndiaNewsBot/1.0; +https://thegreatindianews.netlify.app)',
-      Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.8, */*;q=0.5',
       'Accept-Language': 'en-IN,en;q=0.9,ta;q=0.8',
     },
     redirect: 'follow',
@@ -191,12 +239,49 @@ export const fetchFeedXml = async (url) => {
     throw err;
   }
   const text = await res.text();
-  if (/<\s*html[\s>]/i.test(text) && !/<\s*rss[\s>]|<\s*feed[\s>]/i.test(text)) {
-    const err = new Error('URL did not return an RSS/Atom feed');
-    err.statusCode = 422;
-    throw err;
+  return { text, finalUrl: res.url || url };
+};
+
+export const fetchFeedXml = async (url) => {
+  const tried = new Set();
+  const queue = [url];
+
+  while (queue.length) {
+    const next = queue.shift();
+    if (!next || tried.has(next)) continue;
+    tried.add(next);
+
+    let text;
+    let finalUrl = next;
+    try {
+      ({ text, finalUrl } = await fetchUrlText(next));
+    } catch (err) {
+      if (tried.size === 1 && queue.length === 0) throw err;
+      continue;
+    }
+
+    if (isFeedXml(text)) {
+      return text;
+    }
+
+    if (isHtmlDocument(text)) {
+      const discovered = discoverFeedUrlsFromHtml(text, finalUrl || next);
+      for (const d of discovered) {
+        if (!tried.has(d) && !queue.includes(d)) queue.push(d);
+      }
+      // Only guess common paths from the original site URL once
+      if (next === url) {
+        for (const c of candidateFeedUrls(url)) {
+          if (!tried.has(c) && !queue.includes(c)) queue.push(c);
+        }
+      }
+      continue;
+    }
   }
-  return text;
+
+  const err = new Error('URL did not return an RSS/Atom feed');
+  err.statusCode = 422;
+  throw err;
 };
 
 /** Enrich RSS item with full publisher article + optional Tamil translation */

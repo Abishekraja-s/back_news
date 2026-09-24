@@ -23,11 +23,11 @@ export const ABOUT_PAGE_DEFAULTS = {
   founder: {
     sectionTitle: 'Independent Journalism, Powered by People',
     subtitle: 'Our leadership and editorial team are committed to responsible journalism.',
-    name: 'R. Abishekraja',
+    name: 'R. Balamurugan',
     designation: 'FOUNDER AND CHAIRMAN',
     description:
-      'R. Abishekraja is the founder and chairman of The Great India News, with a passion for social welfare and a commitment to serving the public interest. His vision is to build an independent publishing platform that delivers credible, responsible, and meaningful news to readers across India. The organization is guided by principles of transparency, accuracy, accountability, and public-interest journalism.',
-    initials: 'RA',
+      'R. Balamurugan is the founder and chairman of The Great India News, with a passion for social welfare and a commitment to serving the public interest. His vision is to build an independent publishing platform that delivers credible, responsible, and meaningful news to readers across India. The organization is guided by principles of transparency, accuracy, accountability, and public-interest journalism.',
+    initials: 'RB',
   },
   bureauOverview: {
     title: 'BUREAU OVERVIEW',

@@ -7,6 +7,7 @@ import {
   updateNotification,
   bulkStatus,
   bulkDelete,
+  deleteByDate,
   deleteNotification,
   publishAll,
   getPublic,
@@ -30,6 +31,7 @@ router.post('/fetch', protect, authorize(...managers), fetchNow);
 router.get('/notifications', protect, authorize(...managers), getNotifications);
 router.put('/notifications/bulk-status', protect, authorize(...managers), bulkStatus);
 router.post('/notifications/bulk-delete', protect, authorize(...managers), bulkDelete);
+router.post('/notifications/delete-by-date', protect, authorize(...managers), deleteByDate);
 router.post('/notifications/publish-all', protect, authorize(...managers), publishAll);
 router.put('/notifications/:id', protect, authorize(...managers), updateNotification);
 router.delete('/notifications/:id', protect, authorize(...managers), deleteNotification);

@@ -10,6 +10,7 @@ import {
   updateItem,
   bulkUpdateStatus,
   deleteItem,
+  deleteItemsByDate,
   getPublicItems,
   getPublicList,
   getPublicBySlug,
@@ -36,6 +37,7 @@ router.get('/filters', protect, authorize(...managers), getAdminFilterOptions);
 router.get('/items', protect, authorize(...managers), getAdminItems);
 router.post('/items', protect, authorize(...managers), createItem);
 router.put('/items/bulk-status', protect, authorize(...managers), bulkUpdateStatus);
+router.post('/items/delete-by-date', protect, authorize(...managers), deleteItemsByDate);
 router.get('/items/:id', protect, authorize(...managers), getItemById);
 router.put('/items/:id', protect, authorize(...managers), updateItem);
 router.delete('/items/:id', protect, authorize(...managers), deleteItem);

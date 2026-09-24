@@ -16,6 +16,7 @@ export const ADMIN_PAGES = [
   { key: 'feature-content', label: 'Feature Content', path: '/admin/feature-content' },
   { key: 'marketplace', label: 'Marketplace', path: '/admin/marketplace' },
   { key: 'matrimony', label: 'Matrimony', path: '/admin/matrimony' },
+  { key: 'astrology', label: 'Astrology', path: '/admin/astrology' },
   { key: 'youtube-slider', label: 'YouTube Slider', path: '/admin/youtube-slider' },
   { key: 'instagram-posts', label: 'Instagram Posts', path: '/admin/instagram-posts' },
   { key: 'google-news', label: 'Google News', path: '/admin/google-news' },
@@ -59,6 +60,7 @@ export const pathToPageKey = (pathname) => {
   if (pathname.startsWith('/admin/articles')) return 'articles';
   if (pathname.startsWith('/admin/role-permissions')) return 'role-permissions';
   if (pathname.startsWith('/admin/matrimony')) return 'matrimony';
+  if (pathname.startsWith('/admin/astrology')) return 'astrology';
   if (pathname.startsWith('/admin/page-menu')) return 'menu-management';
 
   const match = ADMIN_PAGES.find(

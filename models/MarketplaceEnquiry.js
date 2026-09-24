@@ -7,7 +7,7 @@ const marketplaceEnquirySchema = new mongoose.Schema(
     seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     buyerName: { type: String, required: true, trim: true },
     buyerEmail: { type: String, required: true, trim: true, lowercase: true },
-    buyerPhone: { type: String, default: '', trim: true },
+    buyerPhone: { type: String, required: true, trim: true },
     message: { type: String, required: true, trim: true },
     status: {
       type: String,

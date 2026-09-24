@@ -219,6 +219,106 @@ const pickBody = (body = {}) => {
   return out;
 };
 
+const REQUIRED_PROFILE_FIELD_LABELS = {
+  fullName: 'Full name',
+  gender: 'Gender',
+  profilePhoto: 'Profile photo',
+  dateOfBirth: 'Date of birth',
+  birthTime: 'Birth time',
+  birthPlace: 'Birth place',
+  nativePlace: 'Native place',
+  currentLocation: 'Current location',
+  maritalStatus: 'Marital status',
+  motherTongue: 'Mother tongue',
+  category: 'Category',
+  categoryName: 'Category name',
+  religion: 'Religion',
+  caste: 'Caste',
+  subCaste: 'Sub-caste',
+  rasi: 'Rasi',
+  nakshatra: 'Nakshatra',
+  lagnam: 'Lagnam',
+  gothram: 'Gothram',
+  birthStar: 'Birth star',
+  dosham: 'Dosham',
+  horoscopeUrl: 'Horoscope',
+  height: 'Height',
+  weight: 'Weight',
+  bodyType: 'Body type',
+  complexion: 'Complexion',
+  physicalStatus: 'Physical status',
+  bloodGroup: 'Blood group',
+  education: 'Education',
+  college: 'College',
+  profession: 'Profession',
+  company: 'Company',
+  jobLocation: 'Job location',
+  annualIncome: 'Annual income',
+  workExperience: 'Work experience',
+  fatherName: "Father's name",
+  fatherOccupation: "Father's occupation",
+  motherName: "Mother's name",
+  motherOccupation: "Mother's occupation",
+  brotherName: "Brother's name",
+  brotherMaritalStatus: "Brother's marital status",
+  sisterName: "Sister's name",
+  sisterMaritalStatus: "Sister's marital status",
+  familyType: 'Family type',
+  familyStatus: 'Family status',
+  familyLocation: 'Family location',
+  address: 'Address',
+  city: 'City',
+  district: 'District',
+  state: 'State',
+  country: 'Country',
+  mobile: 'Mobile number',
+  alternateMobile: 'Alternate mobile',
+  email: 'Email',
+  preferredContactMethod: 'Preferred contact method',
+  prefAgeMin: 'Preferred age min',
+  prefAgeMax: 'Preferred age max',
+  prefHeightMin: 'Preferred height min',
+  prefHeightMax: 'Preferred height max',
+  prefReligion: 'Preferred religion',
+  prefCaste: 'Preferred caste',
+  prefEducation: 'Preferred education',
+  prefProfession: 'Preferred profession',
+  prefLocation: 'Preferred location',
+  prefMaritalStatus: 'Preferred marital status',
+  otherExpectations: 'Other expectations',
+  aboutMe: 'About me',
+  hobbies: 'Hobbies',
+  interests: 'Interests',
+  foodHabits: 'Food habits',
+  smoking: 'Smoking',
+  drinking: 'Drinking',
+  languagesKnown: 'Languages known',
+};
+
+const validateRequiredProfileFields = (body) => {
+  for (const [key, label] of Object.entries(REQUIRED_PROFILE_FIELD_LABELS)) {
+    const val = body[key];
+    if (val === undefined || val === null || String(val).trim() === '') {
+      return `${label} is required`;
+    }
+  }
+  if (!Array.isArray(body.photos) || body.photos.filter(Boolean).length === 0) {
+    return 'At least one additional photo is required';
+  }
+  const phone = String(body.mobile || '').replace(/\D/g, '');
+  if (!/^\d{10}$/.test(phone)) {
+    return 'Enter a valid 10-digit mobile number';
+  }
+  const altPhone = String(body.alternateMobile || '').replace(/\D/g, '');
+  if (!/^\d{10}$/.test(altPhone)) {
+    return 'Enter a valid 10-digit alternate mobile number';
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(body.email || '').trim())) {
+    return 'Enter a valid email address';
+  }
+  return null;
+};
+
 /* ─── Config ─── */
 export const getConfig = async (req, res, next) => {
   try {
@@ -698,7 +798,7 @@ export const createEnquiry = async (req, res, next) => {
     const enquiry = await MatrimonyEnquiry.create({
       profile: profile._id,
       profileOwner: profileOwnerId,
-      submittedBy: req.user?.role === ROLES.MATRIMONY ? req.user._id : undefined,
+      submittedBy: req.user?._id || undefined,
       enquirerName: enquirerName.trim(),
       enquirerPhone: enquirerPhone.trim(),
       comment: comment.trim(),
@@ -735,11 +835,11 @@ export const getMySubmittedEnquiries = async (req, res, next) => {
 
     const [sentRows, receivedRows] = await Promise.all([
       MatrimonyEnquiry.find({ $or: sentConditions })
-        .populate('profile', 'fullName profileId profilePhoto city age gender')
+        .populate('profile', 'fullName profileId profilePhoto city age gender mobile')
         .sort({ createdAt: -1 })
         .lean(),
       MatrimonyEnquiry.find({ $or: receivedConditions })
-        .populate('profile', 'fullName profileId profilePhoto city age gender')
+        .populate('profile', 'fullName profileId profilePhoto city age gender mobile')
         .sort({ createdAt: -1 })
         .lean(),
     ]);
@@ -755,11 +855,100 @@ export const getMySubmittedEnquiries = async (req, res, next) => {
       }
     });
 
-    const data = [...byId.values()].sort(
+    let data = [...byId.values()].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
+    const submitterIds = [
+      ...new Set(data.map((row) => (row.submittedBy ? String(row.submittedBy) : null)).filter(Boolean)),
+    ];
+    const phones = [
+      ...new Set(
+        data
+          .filter((row) => !row.submittedBy && row.enquirerPhone)
+          .map((row) => String(row.enquirerPhone).replace(/\D/g, ''))
+          .filter((p) => p.length >= 10)
+      ),
+    ];
+
+    const enquirerProfiles = [];
+    if (submitterIds.length) {
+      const byUser = await MatrimonyProfile.find({ createdBy: { $in: submitterIds } })
+        .select('fullName profileId profilePhoto city age gender createdBy mobile')
+        .lean();
+      enquirerProfiles.push(...byUser);
+    }
+    if (phones.length) {
+      const phoneUsers = await User.find({
+        $or: phones.flatMap((p) => [{ phone: p }, { phone: p.slice(-10) }]),
+      })
+        .select('_id phone')
+        .lean();
+      const phoneUserIds = phoneUsers.map((u) => u._id);
+      if (phoneUserIds.length) {
+        const byPhoneUser = await MatrimonyProfile.find({ createdBy: { $in: phoneUserIds } })
+          .select('fullName profileId profilePhoto city age gender createdBy mobile')
+          .lean();
+        enquirerProfiles.push(...byPhoneUser);
+      }
+      const byMobile = await MatrimonyProfile.find({
+        $or: phones.flatMap((p) => [{ mobile: p }, { mobile: p.slice(-10) }]),
+      })
+        .select('fullName profileId profilePhoto city age gender createdBy mobile')
+        .lean();
+      enquirerProfiles.push(...byMobile);
+    }
+
+    const profileByUserId = new Map();
+    const profileByPhone = new Map();
+    for (const p of enquirerProfiles) {
+      if (p.createdBy) profileByUserId.set(String(p.createdBy), p);
+      const digits = String(p.mobile || '').replace(/\D/g, '');
+      if (digits.length >= 10) profileByPhone.set(digits.slice(-10), p);
+    }
+
+    data = data.map((row) => {
+      let enquirerProfile = null;
+      if (row.submittedBy) {
+        enquirerProfile = profileByUserId.get(String(row.submittedBy)) || null;
+      }
+      if (!enquirerProfile && row.enquirerPhone) {
+        const digits = String(row.enquirerPhone).replace(/\D/g, '').slice(-10);
+        enquirerProfile = profileByPhone.get(digits) || null;
+      }
+      return { ...row, enquirerProfile };
+    });
+
     res.json({ success: true, data, sent: sentRows, received: receivedRows });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteMyEnquiry = async (req, res, next) => {
+  try {
+    const enquiry = await MatrimonyEnquiry.findById(req.params.id);
+    if (!enquiry) {
+      return res.status(404).json({ success: false, message: 'Enquiry not found' });
+    }
+
+    const uid = req.user._id;
+    const isOwner = enquiry.profileOwner && String(enquiry.profileOwner) === String(uid);
+    const isSubmitter = enquiry.submittedBy && String(enquiry.submittedBy) === String(uid);
+    const phone = String(req.user.phone || '').replace(/\D/g, '');
+    const enquiryPhone = String(enquiry.enquirerPhone || '').replace(/\D/g, '');
+    const isPhoneMatch =
+      phone.length >= 10
+      && enquiryPhone.length >= 10
+      && phone.slice(-10) === enquiryPhone.slice(-10)
+      && !enquiry.submittedBy;
+
+    if (!isOwner && !isSubmitter && !isPhoneMatch) {
+      return res.status(403).json({ success: false, message: 'Not allowed to delete this enquiry' });
+    }
+
+    await enquiry.deleteOne();
+    res.json({ success: true, message: 'Enquiry deleted' });
   } catch (error) {
     next(error);
   }
@@ -1126,11 +1315,18 @@ const syncMemberLoginOnUpdate = async (profile, {
 export const registerMatrimonyMember = async (req, res, next) => {
   try {
     const { name, email, password, phone, city } = req.body;
-    if (!email?.trim() || !password) {
-      return res.status(400).json({ success: false, message: 'Email and password are required' });
+    if (!name?.trim() || !email?.trim() || !password || !phone?.trim() || !city?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email, password, phone and city are required',
+      });
     }
     if (String(password).length < 6) {
       return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+    }
+    const phoneDigits = String(phone).replace(/\D/g, '');
+    if (!/^\d{10}$/.test(phoneDigits)) {
+      return res.status(400).json({ success: false, message: 'Enter a valid 10-digit mobile number' });
     }
 
     const exists = await User.findOne({ email: email.trim().toLowerCase() });
@@ -1138,15 +1334,13 @@ export const registerMatrimonyMember = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Email already registered' });
     }
 
-    const displayName = name?.trim() || email.trim().split('@')[0] || 'Member';
-
     const user = await User.create({
-      name: displayName,
+      name: name.trim(),
       email: email.trim().toLowerCase(),
       password,
       role: ROLES.MATRIMONY,
-      phone: phone?.trim() || '',
-      city: city?.trim() || '',
+      phone: phoneDigits,
+      city: city.trim(),
       status: 'active',
     });
 
@@ -1188,6 +1382,11 @@ export const createMyProfile = async (req, res, next) => {
     }
     if (!body.gender || !MATRIMONY_GENDERS.includes(body.gender)) {
       return res.status(400).json({ success: false, message: 'Valid gender is required' });
+    }
+
+    const requiredErr = validateRequiredProfileFields(body);
+    if (requiredErr) {
+      return res.status(400).json({ success: false, message: requiredErr });
     }
 
     let profileId = await nextProfileId(config);
@@ -1253,6 +1452,16 @@ export const updateMyProfile = async (req, res, next) => {
 
     const config = await getOrCreateMatrimonyConfig();
     const body = memberPickBody(req.body);
+
+    const requiredErr = validateRequiredProfileFields({
+      ...doc.toObject(),
+      ...body,
+      photos: body.photos !== undefined ? body.photos : doc.photos,
+    });
+    if (requiredErr) {
+      return res.status(400).json({ success: false, message: requiredErr });
+    }
+
     Object.assign(doc, body);
     doc.updatedBy = req.user._id;
     doc.submissionHash = submissionFingerprint({

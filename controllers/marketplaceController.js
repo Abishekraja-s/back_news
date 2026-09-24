@@ -23,6 +23,9 @@ export const getPublicProducts = async (req, res, next) => {
     if (req.query.location) {
       filter.location = new RegExp(String(req.query.location), 'i');
     }
+    if (req.query.category) {
+      filter.category = String(req.query.category).trim();
+    }
 
     const total = await MarketplaceProduct.countDocuments(filter);
     const products = await MarketplaceProduct.find(filter)
@@ -146,12 +149,13 @@ export const createProduct = async (req, res, next) => {
       location: location?.trim() || req.user.city || '',
       image: image || '',
       images: images || [],
-      category: category?.trim() || 'General',
+      category: category?.trim() || 'Electronics',
       condition: condition || 'used',
-      status: MARKETPLACE_PRODUCT_STATUS.PENDING,
+      status: MARKETPLACE_PRODUCT_STATUS.APPROVED,
+      approvedAt: new Date(),
     });
 
-    res.status(201).json({ success: true, data: product, message: 'Submitted for admin review' });
+    res.status(201).json({ success: true, data: product, message: 'Product listed on marketplace' });
   } catch (error) {
     next(error);
   }
@@ -169,18 +173,16 @@ export const updateMyProduct = async (req, res, next) => {
       if (req.body[f] !== undefined) product[f] = f === 'price' ? Number(req.body[f]) : req.body[f];
     });
 
-    // Edits go back to pending unless marking sold/inactive from approved
+    // Keep listing live after edits; only force offline when seller/admin sets sold/inactive
     if (req.body.status === MARKETPLACE_PRODUCT_STATUS.SOLD || req.body.status === MARKETPLACE_PRODUCT_STATUS.INACTIVE) {
-      if (product.status === MARKETPLACE_PRODUCT_STATUS.APPROVED) {
-        product.status = req.body.status;
-      }
-    } else if (['title', 'description', 'price', 'location', 'image', 'images', 'category', 'condition'].some((f) => req.body[f] !== undefined)) {
-      if (product.status !== MARKETPLACE_PRODUCT_STATUS.PENDING) {
-        product.status = MARKETPLACE_PRODUCT_STATUS.PENDING;
-        product.rejectionReason = '';
-        product.approvedAt = undefined;
-        product.approvedBy = undefined;
-      }
+      product.status = req.body.status;
+    } else if (
+      product.status === MARKETPLACE_PRODUCT_STATUS.PENDING ||
+      product.status === MARKETPLACE_PRODUCT_STATUS.REJECTED
+    ) {
+      product.status = MARKETPLACE_PRODUCT_STATUS.APPROVED;
+      product.approvedAt = product.approvedAt || new Date();
+      product.rejectionReason = '';
     }
 
     await product.save();
@@ -232,12 +234,42 @@ export const updateEnquiry = async (req, res, next) => {
   }
 };
 
+export const deleteEnquiry = async (req, res, next) => {
+  try {
+    const enquiry = await MarketplaceEnquiry.findOne({ _id: req.params.id, seller: req.user._id });
+    if (!enquiry) {
+      return res.status(404).json({ success: false, message: 'Enquiry not found' });
+    }
+    await enquiry.deleteOne();
+    res.json({ success: true, message: 'Enquiry deleted' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /** Public enquiry to seller */
 export const createEnquiry = async (req, res, next) => {
   try {
     const { buyerName, buyerEmail, buyerPhone, message } = req.body;
-    if (!buyerName?.trim() || !buyerEmail?.trim() || !message?.trim()) {
-      return res.status(400).json({ success: false, message: 'Name, email and message are required' });
+    const name = buyerName?.trim();
+    const email = buyerEmail?.trim()?.toLowerCase();
+    const phone = String(buyerPhone || '').replace(/\D/g, '');
+    const msg = message?.trim();
+
+    if (!name || !email || !phone || !msg) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email, phone and message are required',
+      });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, message: 'Enter a valid email' });
+    }
+    if (!/^\d{10}$/.test(phone)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Enter a valid 10-digit phone number',
+      });
     }
 
     const product = await MarketplaceProduct.findOne({
@@ -251,10 +283,10 @@ export const createEnquiry = async (req, res, next) => {
     const enquiry = await MarketplaceEnquiry.create({
       product: product._id,
       seller: product.seller,
-      buyerName: buyerName.trim(),
-      buyerEmail: buyerEmail.trim().toLowerCase(),
-      buyerPhone: buyerPhone?.trim() || '',
-      message: message.trim(),
+      buyerName: name,
+      buyerEmail: email,
+      buyerPhone: phone,
+      message: msg,
     });
 
     res.status(201).json({ success: true, data: enquiry, message: 'Enquiry sent to seller' });
@@ -309,6 +341,84 @@ export const reviewProduct = async (req, res, next) => {
 
     await product.save();
     res.json({ success: true, data: product, message: `Product ${status.toLowerCase()}` });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteAdminProduct = async (req, res, next) => {
+  try {
+    const product = await MarketplaceProduct.findByIdAndDelete(req.params.id);
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+    await MarketplaceEnquiry.deleteMany({ product: product._id });
+    res.json({ success: true, message: 'Product deleted' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const buildCreatedAtFilter = (from, to) => {
+  const createdAt = {};
+  if (from) {
+    const start = new Date(`${String(from).slice(0, 10)}T00:00:00.000`);
+    if (!Number.isNaN(start.getTime())) createdAt.$gte = start;
+  }
+  if (to) {
+    const end = new Date(`${String(to).slice(0, 10)}T23:59:59.999`);
+    if (!Number.isNaN(end.getTime())) createdAt.$lte = end;
+  }
+  return Object.keys(createdAt).length ? { createdAt } : null;
+};
+
+/** Admin: delete products created within a date range (optional status filter) */
+export const deleteAdminProductsByDate = async (req, res, next) => {
+  try {
+    const { from, to, status, dryRun } = req.body || {};
+    if (!from && !to) {
+      return res.status(400).json({
+        success: false,
+        message: 'Provide from and/or to date (YYYY-MM-DD)',
+      });
+    }
+
+    const dateFilter = buildCreatedAtFilter(from, to);
+    if (!dateFilter) {
+      return res.status(400).json({ success: false, message: 'Invalid date range' });
+    }
+
+    const filter = { ...dateFilter };
+    if (status && Object.values(MARKETPLACE_PRODUCT_STATUS).includes(status)) {
+      filter.status = status;
+    }
+
+    const count = await MarketplaceProduct.countDocuments(filter);
+    if (dryRun) {
+      return res.json({
+        success: true,
+        data: { count, filter: { from: from || null, to: to || null, status: status || null } },
+      });
+    }
+
+    if (!count) {
+      return res.json({
+        success: true,
+        message: 'No products matched that date range',
+        data: { deleted: 0 },
+      });
+    }
+
+    const ids = await MarketplaceProduct.find(filter).select('_id').lean();
+    const productIds = ids.map((p) => p._id);
+    await MarketplaceEnquiry.deleteMany({ product: { $in: productIds } });
+    const result = await MarketplaceProduct.deleteMany({ _id: { $in: productIds } });
+
+    res.json({
+      success: true,
+      message: `Deleted ${result.deletedCount} product(s)`,
+      data: { deleted: result.deletedCount },
+    });
   } catch (error) {
     next(error);
   }

@@ -1,0 +1,58 @@
+/**
+ * Curated Tamil Nadu / India topics for daily Trending Now rotation.
+ * Hashtags rotate by IST date; counts change every day.
+ */
+
+export const TRENDING_TOPIC_BANK = [
+  { tag: 'ChennaiRain', tagTamil: 'சென்னை மழை', category: 'weather' },
+  { tag: 'GoldPrice', tagTamil: 'தங்க விலை', category: 'economy' },
+  { tag: 'TNPSC', tagTamil: 'டிஎன்பிஎஸ்சி', category: 'exams' },
+  { tag: 'ChennaiMetro', tagTamil: 'சென்னை மெட்ரோ', category: 'transport' },
+  { tag: 'PetrolPrice', tagTamil: 'பெட்ரோல் விலை', category: 'economy' },
+  { tag: 'DieselPrice', tagTamil: 'டீசல் விலை', category: 'economy' },
+  { tag: 'Sensex', tagTamil: 'சென்செக்ஸ்', category: 'market' },
+  { tag: 'Nifty50', tagTamil: 'நிஃப்டி 50', category: 'market' },
+  { tag: 'IBPS', tagTamil: 'ஐபிபிஎஸ்', category: 'exams' },
+  { tag: 'SBIExam', tagTamil: 'எஸ்பிஐ தேர்வு', category: 'exams' },
+  { tag: 'NEET', tagTamil: 'நீட்', category: 'exams' },
+  { tag: 'JEE', tagTamil: 'ஜேஇஇ', category: 'exams' },
+  { tag: 'TamilNaduPolitics', tagTamil: 'தமிழ்நாடு அரசியல்', category: 'politics' },
+  { tag: 'AssemblySession', tagTamil: 'சட்டமன்றம்', category: 'politics' },
+  { tag: 'ChennaiTraffic', tagTamil: 'சென்னை போக்குவரத்து', category: 'transport' },
+  { tag: 'OMR', tagTamil: 'ஓஎம்ஆர்', category: 'local' },
+  { tag: 'Coimbatore', tagTamil: 'கோயம்புத்தூர்', category: 'district' },
+  { tag: 'Madurai', tagTamil: 'மதுரை', category: 'district' },
+  { tag: 'Tiruchy', tagTamil: 'திருச்சி', category: 'district' },
+  { tag: 'Salem', tagTamil: 'சேலம்', category: 'district' },
+  { tag: 'IPL', tagTamil: 'ஐபிஎல்', category: 'sports' },
+  { tag: 'CSK', tagTamil: 'சிஎஸ்கே', category: 'sports' },
+  { tag: 'IndiaCricket', tagTamil: 'இந்திய கிரிக்கெட்', category: 'sports' },
+  { tag: 'Cinema', tagTamil: 'சினிமா', category: 'entertainment' },
+  { tag: 'Kollywood', tagTamil: 'கொலிவுட்', category: 'entertainment' },
+  { tag: 'WeatherAlert', tagTamil: 'வானிலை எச்சரிக்கை', category: 'weather' },
+  { tag: 'Cyclone', tagTamil: 'புயல்', category: 'weather' },
+  { tag: 'PowerCut', tagTamil: 'மின்வெட்டு', category: 'local' },
+  { tag: 'WaterSupply', tagTamil: 'தண்ணீர் வழங்கல்', category: 'local' },
+  { tag: 'Education', tagTamil: 'கல்வி', category: 'society' },
+  { tag: 'Healthcare', tagTamil: 'சுகாதாரம்', category: 'society' },
+  { tag: 'StartupIndia', tagTamil: 'ஸ்டார்ட்அப் இந்தியா', category: 'economy' },
+  { tag: 'RBI', tagTamil: 'ஆர்பிஐ', category: 'economy' },
+  { tag: 'GST', tagTamil: 'ஜிஎஸ்டி', category: 'economy' },
+  { tag: 'Budget', tagTamil: 'பட்ஜெட்', category: 'politics' },
+  { tag: 'Farmers', tagTamil: 'விவசாயிகள்', category: 'society' },
+  { tag: 'TourismTN', tagTamil: 'தமிழ்நாடு சுற்றுலா', category: 'travel' },
+  { tag: 'TempleFestival', tagTamil: 'கோயில் திருவிழா', category: 'culture' },
+  { tag: 'Pongal', tagTamil: 'பொங்கல்', category: 'culture' },
+  { tag: 'Deepavali', tagTamil: 'தீபாவளி', category: 'culture' },
+  { tag: 'JobAlert', tagTamil: 'வேலை வாய்ப்பு', category: 'jobs' },
+  { tag: 'GovtJobs', tagTamil: 'அரசு வேலை', category: 'jobs' },
+  { tag: 'UPI', tagTamil: 'யூபிஐ', category: 'tech' },
+  { tag: 'AI', tagTamil: 'செயற்கை நுண்ணறிவு', category: 'tech' },
+  { tag: 'SpaceISRO', tagTamil: 'இஸ்ரோ', category: 'science' },
+  { tag: 'HealthTips', tagTamil: 'சுகாதார குறிப்புகள்', category: 'society' },
+  { tag: 'RealEstate', tagTamil: 'ரியல் எஸ்டேட்', category: 'economy' },
+  { tag: 'AutoSector', tagTamil: 'வாகனத் துறை', category: 'economy' },
+];
+
+export const TRENDING_WIDGET_SIZE = 4;
+export const TRENDING_FULL_SIZE = 20;

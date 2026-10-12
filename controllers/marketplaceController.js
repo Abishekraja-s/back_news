@@ -1,15 +1,43 @@
 import MarketplaceProduct from '../models/MarketplaceProduct.js';
 import MarketplaceEnquiry from '../models/MarketplaceEnquiry.js';
 import User from '../models/User.js';
+import SellerRegistrationOtp from '../models/SellerRegistrationOtp.js';
+import crypto from 'crypto';
 import {
   ROLES,
   MARKETPLACE_PRODUCT_STATUS,
   MARKETPLACE_ENQUIRY_STATUS,
 } from '../config/constants.js';
 import { sendTokenResponse } from '../utils/generateToken.js';
+import { sendMail } from '../utils/mail.js';
 
 const formatPrice = (n) =>
   `₹${Number(n || 0).toLocaleString('en-IN')}`;
+
+const OTP_TTL_MS = 10 * 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+
+const hashOtp = (otp) => crypto.createHash('sha256').update(String(otp)).digest('hex');
+
+const validateSellerRegistrationBody = (body = {}) => {
+  const name = String(body.name || '').trim();
+  const email = String(body.email || '').trim().toLowerCase();
+  const password = String(body.password || '');
+  const phone = String(body.phone || '').trim();
+  const businessName = String(body.businessName || '').trim();
+  const city = String(body.city || '').trim();
+
+  if (!name || !email || !password) {
+    return { error: 'Name, email and password are required' };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: 'Enter a valid email address' };
+  }
+  if (password.length < 6) {
+    return { error: 'Password must be at least 6 characters' };
+  }
+  return { name, email, password, phone, businessName, city };
+};
 
 /** Public: approved listings */
 export const getPublicProducts = async (req, res, next) => {
@@ -89,39 +117,166 @@ export const getHubProducts = async (req, res, next) => {
   }
 };
 
-export const registerSeller = async (req, res, next) => {
+/** Step 1: validate registration details and email a 6-digit OTP */
+export const sendSellerRegisterOtp = async (req, res, next) => {
   try {
-    const { name, email, password, phone, businessName, city } = req.body;
-    if (!name?.trim() || !email?.trim() || !password) {
-      return res.status(400).json({ success: false, message: 'Name, email and password are required' });
+    const parsed = validateSellerRegistrationBody(req.body);
+    if (parsed.error) {
+      return res.status(400).json({ success: false, message: parsed.error });
     }
-    if (String(password).length < 6) {
-      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+    const { name, email, password, phone, businessName, city } = parsed;
+
+    const exists = await User.findOne({ email }).select('_id').lean();
+    if (exists) {
+      return res.status(400).json({ success: false, message: 'Email already registered. Please sign in.' });
     }
 
-    const exists = await User.findOne({ email: email.trim().toLowerCase() });
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+    await SellerRegistrationOtp.deleteMany({ email });
+    await SellerRegistrationOtp.create({
+      email,
+      name,
+      password,
+      phone,
+      businessName,
+      city,
+      otpHash: hashOtp(otp),
+      attempts: 0,
+      expiresAt,
+    });
+
+    try {
+      await sendMail({
+        to: email,
+        subject: 'Your seller registration OTP — The Great India News',
+        text: `Your OTP for seller registration is ${otp}. It is valid for 10 minutes.\n\nIf you did not request this, ignore this email.`,
+        html: `
+          <div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a">
+            <h2 style="margin:0 0 12px">Confirm your seller registration</h2>
+            <p>Use this one-time password to finish creating your marketplace seller account for <strong>${email}</strong>.</p>
+            <p style="font-size:28px;letter-spacing:6px;font-weight:700;margin:24px 0;color:#0f766e">${otp}</p>
+            <p style="font-size:13px;color:#64748b">Valid for 10 minutes. Do not share this code.</p>
+          </div>
+        `,
+      });
+    } catch (mailErr) {
+      await SellerRegistrationOtp.deleteMany({ email });
+      if (mailErr.code === 'SMTP_NOT_CONFIGURED') {
+        return res.status(503).json({
+          success: false,
+          message: 'Email is not set up yet. Ask the site admin to configure SMTP in Admin → Settings.',
+        });
+      }
+      return res.status(502).json({
+        success: false,
+        message: mailErr.message || 'Could not send OTP email. Check SMTP settings.',
+      });
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[SellerOTP] ${email} → ${otp}`);
+    }
+
+    res.json({
+      success: true,
+      message: 'OTP sent to your email. Enter the code to complete registration.',
+      data: { email, expiresInMinutes: 10 },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Step 2: verify OTP, create seller account, return login tokens */
+export const verifySellerRegisterOtp = async (req, res, next) => {
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const otp = String(req.body.otp || '').replace(/\D/g, '');
+    if (!email || otp.length !== 6) {
+      return res.status(400).json({ success: false, message: 'Email and 6-digit OTP are required' });
+    }
+
+    const pending = await SellerRegistrationOtp.findOne({ email }).select('+password +otpHash');
+    if (!pending || pending.expiresAt.getTime() < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP expired or not found. Please request a new code.',
+      });
+    }
+
+    if (pending.attempts >= OTP_MAX_ATTEMPTS) {
+      await SellerRegistrationOtp.deleteMany({ email });
+      return res.status(429).json({
+        success: false,
+        message: 'Too many incorrect attempts. Request a new OTP.',
+      });
+    }
+
+    if (pending.otpHash !== hashOtp(otp)) {
+      pending.attempts += 1;
+      await pending.save();
+      return res.status(400).json({
+        success: false,
+        message: `Invalid OTP. ${OTP_MAX_ATTEMPTS - pending.attempts} attempt(s) left.`,
+      });
+    }
+
+    const exists = await User.findOne({ email }).select('_id').lean();
     if (exists) {
-      return res.status(400).json({ success: false, message: 'Email already registered' });
+      await SellerRegistrationOtp.deleteMany({ email });
+      return res.status(400).json({ success: false, message: 'Email already registered. Please sign in.' });
     }
 
     const user = await User.create({
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
-      password,
+      name: pending.name,
+      email: pending.email,
+      password: pending.password,
       role: ROLES.SELLER,
-      phone: phone?.trim() || '',
-      businessName: businessName?.trim() || '',
-      city: city?.trim() || '',
+      phone: pending.phone || '',
+      businessName: pending.businessName || '',
+      city: pending.city || '',
       status: 'active',
     });
 
-    sendTokenResponse(user, 201, res);
+    await SellerRegistrationOtp.deleteMany({ email });
+
+    try {
+      await sendMail({
+        to: email,
+        subject: 'Seller account created — The Great India News',
+        text: `Welcome ${user.name}! Your seller account is ready. Sign in at the marketplace seller login.`,
+        html: `
+          <div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a">
+            <h2 style="margin:0 0 12px">Welcome, ${user.name}!</h2>
+            <p>Your marketplace seller account is verified and ready.</p>
+            <p>You can sign in anytime with <strong>${email}</strong> and start listing products.</p>
+          </div>
+        `,
+      });
+    } catch {
+      /* non-fatal welcome mail */
+    }
+
+    sendTokenResponse(user, 201, res, {
+      message: 'Email verified. Seller account created successfully.',
+    });
   } catch (error) {
     if (error.code === 11000) {
       return res.status(400).json({ success: false, message: 'Email already registered' });
     }
     next(error);
   }
+};
+
+/** Direct register is disabled — use OTP flow */
+export const registerSeller = async (req, res) => {
+  res.status(400).json({
+    success: false,
+    message: 'Please verify your email OTP to complete seller registration.',
+    code: 'OTP_REQUIRED',
+  });
 };
 
 /** Seller: my products */

@@ -15,8 +15,8 @@ const youtubeChannelSchema = new mongoose.Schema(
     autoFetchEnabled: { type: Boolean, default: true },
     maxVideos: { type: Number, default: 15, min: 1, max: 50 },
     sliderEnabled: { type: Boolean, default: true },
-    sliderTitle: { type: String, default: 'YouTube' },
-    sliderTitleTamil: { type: String, default: 'யூடியூப்' },
+    sliderTitle: { type: String, default: 'Videos' },
+    sliderTitleTamil: { type: String, default: 'வீடியோக்கள்' },
     lastFetchAt: { type: Date },
     lastFetchStatus: {
       type: String,

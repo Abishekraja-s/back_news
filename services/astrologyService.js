@@ -117,9 +117,11 @@ export const getNextSyncDate = (syncTime = DEFAULT_SYNC_TIME, tz = DEFAULT_TIMEZ
       day: '2-digit',
     }).formatToParts(candidate);
     const get = (type) => parts.find((p) => p.type === type)?.value;
-    const h = Number(get('hour'));
+    // Some Node/ICU builds report midnight as "24"
+    let h = Number(get('hour'));
+    if (h === 24) h = 0;
     const m = Number(get('minute'));
-    if (h === hour && m === minute && candidate > from) {
+    if (h === hour && m === minute && candidate.getTime() > from.getTime() + 999) {
       return candidate;
     }
   }

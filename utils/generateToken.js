@@ -12,7 +12,7 @@ export const generateRefreshToken = (id) => {
   });
 };
 
-export const sendTokenResponse = (user, statusCode, res) => {
+export const sendTokenResponse = (user, statusCode, res, extras = {}) => {
   const token = generateAccessToken(user._id);
   const refreshToken = generateRefreshToken(user._id);
 
@@ -29,6 +29,7 @@ export const sendTokenResponse = (user, statusCode, res) => {
     .cookie('refreshToken', refreshToken, { ...options, expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
     .json({
       success: true,
+      message: extras.message || undefined,
       token,
       refreshToken,
       user: {

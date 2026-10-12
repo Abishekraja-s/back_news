@@ -20,7 +20,7 @@ export const startRssIngestJob = () => {
 
       const result = await runAllRssIngest({ onlyAuto: true });
       console.log(
-        `[RssIngest] ${label}: sources=${result.sources} fetched=${result.fetched} created=${result.created} skipped=${result.skipped}`
+        `[RssIngest] ${label}: sources=${result.sources} fetched=${result.fetched} created=${result.created} tamil=${result.translated || 0} skipped=${result.skipped}`
       );
     } catch (err) {
       console.warn('[RssIngest] sync error:', err.message);

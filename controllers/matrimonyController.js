@@ -3,6 +3,7 @@ import MatrimonyProfile from '../models/MatrimonyProfile.js';
 import MatrimonyCategory from '../models/MatrimonyCategory.js';
 import MatrimonyConfig from '../models/MatrimonyConfig.js';
 import MatrimonyEnquiry from '../models/MatrimonyEnquiry.js';
+import MatrimonyRegistrationOtp from '../models/MatrimonyRegistrationOtp.js';
 import User from '../models/User.js';
 import {
   MATRIMONY_PROFILE_STATUS,
@@ -11,6 +12,7 @@ import {
   ROLES,
 } from '../config/constants.js';
 import { sendTokenResponse } from '../utils/generateToken.js';
+import { getClientBaseUrl, sendMail } from '../utils/mail.js';
 
 export const getOrCreateMatrimonyConfig = async () => {
   let config = await MatrimonyConfig.findOne({ key: 'default' });
@@ -28,7 +30,15 @@ const calcAge = (dob) => {
   let age = today.getFullYear() - d.getFullYear();
   const m = today.getMonth() - d.getMonth();
   if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age -= 1;
-  return age;
+  return Number.isFinite(age) ? age : undefined;
+};
+
+const assertAdultAge = (dob) => {
+  const age = calcAge(dob);
+  if (age == null) return 'Enter a valid date of birth';
+  if (age < 18) return 'Age must be 18 or above. Check the date of birth.';
+  if (age > 100) return 'Enter a valid date of birth';
+  return null;
 };
 
 const pushHistory = (doc, action, note, userId) => {
@@ -211,7 +221,11 @@ const pickBody = (body = {}) => {
     out.category = body.category || null;
   }
   if (body.dateOfBirth) {
-    out.age = calcAge(body.dateOfBirth);
+    const age = calcAge(body.dateOfBirth);
+    if (age != null && age >= 18) out.age = age;
+    else delete out.age;
+  } else {
+    delete out.age;
   }
   if (Array.isArray(body.photos)) {
     out.photos = body.photos.map(String).filter(Boolean);
@@ -316,6 +330,8 @@ const validateRequiredProfileFields = (body) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(body.email || '').trim())) {
     return 'Enter a valid email address';
   }
+  const ageErr = assertAdultAge(body.dateOfBirth);
+  if (ageErr) return ageErr;
   return null;
 };
 
@@ -1192,6 +1208,62 @@ const httpError = (statusCode, message) => {
   return err;
 };
 
+const validationMessage = (error) => {
+  if (error?.name === 'ValidationError') {
+    const first = Object.values(error.errors || {})[0];
+    return first?.message || 'Invalid profile data';
+  }
+  return error?.message || 'Save failed';
+};
+
+const rollbackMatrimonyMember = async (userId) => {
+  if (!userId) return;
+  const profiles = await MatrimonyProfile.find({ createdBy: userId }).select('_id').lean();
+  const profileIds = profiles.map((p) => p._id);
+  if (profileIds.length) {
+    await MatrimonyEnquiry.deleteMany({
+      $or: [{ profile: { $in: profileIds } }, { profileOwner: userId }, { submittedBy: userId }],
+    });
+    await MatrimonyProfile.deleteMany({ createdBy: userId });
+  }
+  await User.findByIdAndDelete(userId);
+};
+
+const sendRegistrationConfirmation = async ({ user, doc, config }) => {
+  const loginUrl = `${getClientBaseUrl()}/matrimony/login`;
+  await sendMail({
+    to: doc.email || user.email,
+    subject: 'Matrimony registration confirmed — The Great India News',
+    text:
+      `Vanakkam ${doc.fullName || user.name},\n\n` +
+      `Your matrimony registration was successful.\n` +
+      `Profile ID: ${doc.profileId || '—'}\n` +
+      `Login email: ${user.email}\n\n` +
+      (config.requireApproval
+        ? 'Your profile is pending admin approval. You can sign in now to view status.\n\n'
+        : 'You can sign in now to manage your profile.\n\n') +
+      `Sign in: ${loginUrl}\n\n` +
+      `The Great India News Matrimony`,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a;max-width:560px">
+        <h2 style="margin:0 0 12px;color:#0f766e">Registration successful</h2>
+        <p>Vanakkam <strong>${doc.fullName || user.name}</strong>,</p>
+        <p>Your matrimony profile has been submitted${config.requireApproval ? ' and is pending admin approval' : ''}.</p>
+        <p style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 16px">
+          Profile ID: <strong>${doc.profileId || '—'}</strong><br/>
+          Login email: <strong>${user.email}</strong>
+        </p>
+        <p style="margin:24px 0">
+          <a href="${loginUrl}" style="background:#0f766e;color:#fff;padding:12px 18px;border-radius:999px;text-decoration:none;font-weight:600">
+            Sign in to Matrimony
+          </a>
+        </p>
+        <p style="font-size:13px;color:#64748b">If the button does not work, open: ${loginUrl}</p>
+      </div>
+    `,
+  });
+};
+
 const findMemberUserForProfile = async (profile) => {
   const createdBy = profile.createdBy;
   if (createdBy) {
@@ -1311,40 +1383,252 @@ const syncMemberLoginOnUpdate = async (profile, {
   return { user, plainPassword: undefined };
 };
 
-/* ─── Member portal ─── */
-export const registerMatrimonyMember = async (req, res, next) => {
+const OTP_TTL_MS = 10 * 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+const hashOtp = (otp) => crypto.createHash('sha256').update(String(otp)).digest('hex');
+
+const validateMemberAccount = (body = {}) => {
+  const name = String(body.name || '').trim();
+  const email = String(body.email || '').trim().toLowerCase();
+  const password = String(body.password || '');
+  const phone = String(body.phone || '').replace(/\D/g, '');
+  const city = String(body.city || '').trim();
+  if (!name || !email || !password || !phone || !city) {
+    return { error: 'Name, email, password, phone and city are required' };
+  }
+  if (password.length < 6) return { error: 'Password must be at least 6 characters' };
+  if (!/^\d{10}$/.test(phone)) return { error: 'Enter a valid 10-digit mobile number' };
+  return { name, email, password, phone, city };
+};
+
+const persistVerifiedMatrimonyRegistration = async (pending) => {
+  const config = await getOrCreateMatrimonyConfig();
+  const body = memberPickBody(pending.profile || {});
+  const requiredErr = validateRequiredProfileFields(body);
+  if (requiredErr) throw httpError(400, requiredErr);
+  const ageErr = assertAdultAge(body.dateOfBirth);
+  if (ageErr) throw httpError(400, ageErr);
+
+  const hash = submissionFingerprint({
+    ...body,
+    mobile: body.mobile || pending.phone,
+    email: body.email || pending.email,
+  });
+  const dup = await MatrimonyProfile.findOne({ submissionHash: hash });
+  if (dup) throw httpError(400, 'A profile with these details already exists. Please sign in.');
+
+  const user = await User.create({
+    name: pending.name,
+    email: pending.email,
+    password: pending.password,
+    role: ROLES.MATRIMONY,
+    phone: pending.phone,
+    city: pending.city,
+    status: 'active',
+  });
+
+  const profileId = await nextProfileId(config);
+  const status = config.requireApproval
+    ? MATRIMONY_PROFILE_STATUS.PENDING
+    : MATRIMONY_PROFILE_STATUS.APPROVED;
+
+  const doc = new MatrimonyProfile({
+    ...body,
+    profileId,
+    mobile: body.mobile || pending.phone,
+    email: body.email || pending.email,
+    submissionHash: hash,
+    status,
+    createdBy: user._id,
+    updatedBy: user._id,
+    isActive: true,
+    isVisible: body.isVisible !== false,
+  });
+  if (status === MATRIMONY_PROFILE_STATUS.APPROVED) doc.approvedAt = new Date();
+  pushHistory(doc, 'created', 'Profile submitted after OTP verification', user._id);
   try {
-    const { name, email, password, phone, city } = req.body;
-    if (!name?.trim() || !email?.trim() || !password || !phone?.trim() || !city?.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Name, email, password, phone and city are required',
-      });
-    }
-    if (String(password).length < 6) {
-      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
-    }
-    const phoneDigits = String(phone).replace(/\D/g, '');
-    if (!/^\d{10}$/.test(phoneDigits)) {
-      return res.status(400).json({ success: false, message: 'Enter a valid 10-digit mobile number' });
-    }
+    await doc.save();
+  } catch (saveErr) {
+    await User.findByIdAndDelete(user._id);
+    throw saveErr;
+  }
+  return { user, doc, config };
+};
 
-    const exists = await User.findOne({ email: email.trim().toLowerCase() });
+/* ─── Member portal ─── */
+export const registerMatrimonyMember = async (_req, res) => {
+  res.status(400).json({
+    success: false,
+    message: 'Please verify your email OTP to complete matrimony registration.',
+    code: 'OTP_REQUIRED',
+  });
+};
+
+export const sendMatrimonyRegisterOtp = async (req, res, next) => {
+  try {
+    const parsed = validateMemberAccount(req.body);
+    if (parsed.error) {
+      return res.status(400).json({ success: false, message: parsed.error });
+    }
+    const { name, email, password, phone, city } = parsed;
+
+    const exists = await User.findOne({ email }).select('_id').lean();
     if (exists) {
-      return res.status(400).json({ success: false, message: 'Email already registered' });
+      return res.status(400).json({ success: false, message: 'Email already registered. Please sign in.' });
     }
 
-    const user = await User.create({
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
+    const profile = memberPickBody({
+      ...req.body.profile,
+      fullName: req.body.profile?.fullName || name,
+      mobile: req.body.profile?.mobile || phone,
+      email: req.body.profile?.email || email,
+      city: req.body.profile?.city || city,
+    });
+    const requiredErr = validateRequiredProfileFields(profile);
+    if (requiredErr) {
+      return res.status(400).json({ success: false, message: requiredErr });
+    }
+    const ageErr = assertAdultAge(profile.dateOfBirth);
+    if (ageErr) {
+      return res.status(400).json({ success: false, message: ageErr });
+    }
+
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+    await MatrimonyRegistrationOtp.deleteMany({ email });
+    await MatrimonyRegistrationOtp.create({
+      email,
+      name,
       password,
-      role: ROLES.MATRIMONY,
-      phone: phoneDigits,
-      city: city.trim(),
-      status: 'active',
+      phone,
+      city,
+      profile,
+      otpHash: hashOtp(otp),
+      attempts: 0,
+      expiresAt,
     });
 
-    sendTokenResponse(user, 201, res);
+    try {
+      await sendMail({
+        to: email,
+        subject: 'Your matrimony registration OTP — The Great India News',
+        text: `Your OTP for matrimony registration is ${otp}. It is valid for 10 minutes.\n\nIf you did not request this, ignore this email.`,
+        html: `
+          <div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a">
+            <h2 style="margin:0 0 12px">Confirm your matrimony registration</h2>
+            <p>Use this one-time password to finish creating your matrimony account for <strong>${email}</strong>.</p>
+            <p style="font-size:28px;letter-spacing:6px;font-weight:700;margin:24px 0;color:#0f766e">${otp}</p>
+            <p style="font-size:13px;color:#64748b">Valid for 10 minutes. Do not share this code.</p>
+            <p style="font-size:13px;color:#64748b">Your profile is saved only after this OTP is verified.</p>
+          </div>
+        `,
+      });
+    } catch (mailErr) {
+      await MatrimonyRegistrationOtp.deleteMany({ email });
+      if (mailErr.code === 'SMTP_NOT_CONFIGURED') {
+        return res.status(503).json({
+          success: false,
+          message: 'Email is not set up yet. Ask the site admin to configure SMTP in Admin → Settings.',
+        });
+      }
+      return res.status(502).json({
+        success: false,
+        message: mailErr.message || 'Could not send OTP email. Check SMTP settings.',
+      });
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[MatrimonyOTP] ${email} → ${otp}`);
+    }
+
+    res.json({
+      success: true,
+      message: 'OTP sent to your email. Enter the code to save your profile.',
+      data: { email, expiresInMinutes: 10 },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyMatrimonyRegisterOtp = async (req, res, next) => {
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const otp = String(req.body.otp || '').replace(/\D/g, '');
+    if (!email || otp.length !== 6) {
+      return res.status(400).json({ success: false, message: 'Email and 6-digit OTP are required' });
+    }
+
+    const pending = await MatrimonyRegistrationOtp.findOne({ email }).select('+password +otpHash');
+    if (!pending || pending.expiresAt.getTime() < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP expired or not found. Please request a new code.',
+      });
+    }
+
+    if (pending.attempts >= OTP_MAX_ATTEMPTS) {
+      await MatrimonyRegistrationOtp.deleteMany({ email });
+      return res.status(429).json({
+        success: false,
+        message: 'Too many incorrect attempts. Request a new OTP.',
+      });
+    }
+
+    if (pending.otpHash !== hashOtp(otp)) {
+      pending.attempts += 1;
+      await pending.save();
+      return res.status(400).json({
+        success: false,
+        message: `Invalid OTP. ${OTP_MAX_ATTEMPTS - pending.attempts} attempt(s) left.`,
+      });
+    }
+
+    const exists = await User.findOne({ email }).select('_id').lean();
+    if (exists) {
+      await MatrimonyRegistrationOtp.deleteMany({ email });
+      return res.status(400).json({ success: false, message: 'Email already registered. Please sign in.' });
+    }
+
+    let saved;
+    try {
+      saved = await persistVerifiedMatrimonyRegistration(pending);
+    } catch (persistErr) {
+      if (persistErr.statusCode) {
+        return res.status(persistErr.statusCode).json({ success: false, message: persistErr.message });
+      }
+      if (persistErr.name === 'ValidationError') {
+        return res.status(400).json({ success: false, message: validationMessage(persistErr) });
+      }
+      throw persistErr;
+    }
+
+    await MatrimonyRegistrationOtp.deleteMany({ email });
+
+    try {
+      await sendRegistrationConfirmation({
+        user: saved.user,
+        doc: saved.doc,
+        config: saved.config,
+      });
+    } catch {
+      /* welcome mail is optional after OTP already proved email */
+    }
+
+    const loginUrl = `${getClientBaseUrl()}/matrimony/login`;
+    res.status(201).json({
+      success: true,
+      emailSent: true,
+      data: {
+        profileId: saved.doc.profileId,
+        email: saved.user.email,
+        loginUrl,
+      },
+      message: saved.config.requireApproval
+        ? 'OTP verified. Profile saved and pending approval. Please sign in.'
+        : 'OTP verified. Profile saved. Please sign in.',
+    });
   } catch (error) {
     if (error.code === 11000) {
       return res.status(400).json({ success: false, message: 'Email already registered' });
@@ -1386,7 +1670,14 @@ export const createMyProfile = async (req, res, next) => {
 
     const requiredErr = validateRequiredProfileFields(body);
     if (requiredErr) {
+      if (req.body.completeRegistration) await rollbackMatrimonyMember(req.user._id);
       return res.status(400).json({ success: false, message: requiredErr });
+    }
+
+    const ageErr = assertAdultAge(body.dateOfBirth);
+    if (ageErr) {
+      if (req.body.completeRegistration) await rollbackMatrimonyMember(req.user._id);
+      return res.status(400).json({ success: false, message: ageErr });
     }
 
     let profileId = await nextProfileId(config);
@@ -1398,6 +1689,7 @@ export const createMyProfile = async (req, res, next) => {
     });
     const dup = await MatrimonyProfile.findOne({ submissionHash: hash });
     if (dup) {
+      if (req.body.completeRegistration) await rollbackMatrimonyMember(req.user._id);
       return res.status(400).json({
         success: false,
         message: 'A profile with these details already exists. Contact support if this is an error.',
@@ -1426,18 +1718,65 @@ export const createMyProfile = async (req, res, next) => {
     }
 
     pushHistory(doc, 'created', 'Profile submitted by member', req.user._id);
-    await doc.save();
+    try {
+      await doc.save();
+    } catch (saveErr) {
+      if (req.body.completeRegistration) await rollbackMatrimonyMember(req.user._id);
+      if (saveErr.code === 11000) {
+        return res.status(400).json({ success: false, message: 'Duplicate profile ID' });
+      }
+      return res.status(400).json({ success: false, message: validationMessage(saveErr) });
+    }
+
+    const complete = Boolean(req.body.completeRegistration);
+    try {
+      await sendRegistrationConfirmation({ user: req.user, doc, config });
+    } catch (mailErr) {
+      if (complete) {
+        await rollbackMatrimonyMember(req.user._id);
+        if (mailErr.code === 'SMTP_NOT_CONFIGURED') {
+          return res.status(503).json({
+            success: false,
+            message: 'Confirmation email could not be sent. Ask admin to configure SMTP in Settings. Nothing was saved.',
+          });
+        }
+        return res.status(502).json({
+          success: false,
+          message: 'Confirmation email failed. Registration was not saved. Please try again.',
+        });
+      }
+      console.warn('[Matrimony register email]', mailErr.message);
+      return res.status(201).json({
+        success: true,
+        data: doc,
+        emailSent: false,
+        message: mailErr.code === 'SMTP_NOT_CONFIGURED'
+          ? 'Profile saved, but confirmation email could not be sent (SMTP not configured).'
+          : 'Profile saved, but confirmation email could not be sent.',
+      });
+    }
 
     res.status(201).json({
       success: true,
       data: doc,
+      emailSent: true,
       message: config.requireApproval
-        ? 'Profile submitted for admin approval'
-        : 'Profile created and published',
+        ? 'Registration successful. Confirmation email sent. Sign in after checking your inbox. Profile is pending approval.'
+        : 'Registration successful. Confirmation email sent. Please sign in.',
     });
   } catch (error) {
+    if (req.body?.completeRegistration) {
+      try {
+        await rollbackMatrimonyMember(req.user?._id);
+      } catch {
+        /* ignore */
+      }
+    }
     if (error.code === 11000) {
       return res.status(400).json({ success: false, message: 'Duplicate profile ID' });
+    }
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ success: false, message: validationMessage(error) });
     }
     next(error);
   }
@@ -1501,6 +1840,22 @@ export const deleteMyProfile = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'No profile to delete' });
     }
     res.json({ success: true, message: 'Profile deleted' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const rollbackIncompleteRegistration = async (req, res, next) => {
+  try {
+    const profile = await MatrimonyProfile.findOne({ createdBy: req.user._id }).select('_id').lean();
+    if (profile) {
+      return res.status(400).json({
+        success: false,
+        message: 'A saved profile exists. Sign in to manage it instead of rolling back.',
+      });
+    }
+    await rollbackMatrimonyMember(req.user._id);
+    res.json({ success: true, message: 'Incomplete registration cleared' });
   } catch (error) {
     next(error);
   }

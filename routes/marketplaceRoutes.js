@@ -4,6 +4,8 @@ import {
   getPublicProduct,
   getHubProducts,
   registerSeller,
+  sendSellerRegisterOtp,
+  verifySellerRegisterOtp,
   getMyProducts,
   createProduct,
   updateMyProduct,
@@ -38,6 +40,8 @@ router.get('/products/hub', getHubProducts);
 router.get('/products/:id', getPublicProduct);
 router.get('/categories', getPublicCategories);
 router.post('/products/:id/enquiries', createEnquiry);
+router.post('/seller/register/send-otp', sendSellerRegisterOtp);
+router.post('/seller/register/verify-otp', verifySellerRegisterOtp);
 router.post('/seller/register', registerSeller);
 
 // Seller

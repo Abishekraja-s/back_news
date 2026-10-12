@@ -10,6 +10,7 @@ export const ADMIN_PAGES = [
   { key: 'media', label: 'Media', path: '/admin/media' },
   { key: 'breaking-news', label: 'Breaking News', path: '/admin/breaking-news' },
   { key: 'advertisements', label: 'Advertisements', path: '/admin/advertisements' },
+  { key: 'event-gif', label: 'Event GIF', path: '/admin/event-gif' },
   { key: 'adsense', label: 'AdSense Placement', path: '/admin/adsense' },
   { key: 'google-analytics', label: 'Google Analytics', path: '/admin/google-analytics' },
   { key: 'features', label: 'Features', path: '/admin/features' },
@@ -48,7 +49,7 @@ export const DEFAULT_ROLE_PERMISSIONS = {
     'breaking-news',
   ],
   [ROLES.AUTHOR]: ['dashboard', 'articles', 'articles-create', 'media'],
-  [ROLES.AD_MANAGER]: ['dashboard', 'advertisements', 'adsense', 'google-analytics'],
+  [ROLES.AD_MANAGER]: ['dashboard', 'advertisements', 'event-gif', 'adsense', 'google-analytics'],
   [ROLES.SELLER]: [],
 };
 

@@ -55,6 +55,15 @@ const throwGeminiHttpError = (response, payload = {}) => {
     throw err;
   }
 
+  if (response.status === 402 || /payment|billing|prepayment|credits? are depleted|insufficient/i.test(apiMessage)) {
+    const err = new Error(
+      apiMessage?.trim() ||
+        'Gemini billing credits are depleted. Add prepaid credits in Google AI Studio (https://ai.studio/projects), then try again.'
+    );
+    err.statusCode = 402;
+    throw err;
+  }
+
   const msg = apiMessage || `Gemini API error (${response.status})`;
   const err = new Error(msg);
   err.statusCode = response.status >= 400 && response.status < 600 ? response.status : 502;
@@ -330,6 +339,59 @@ const createGeminiInteraction = async ({ body, apiKey, timeoutMs = GEMINI_REQUES
   return pollInteractionUntilDone(payload.id, apiKey, deadlineMs);
 };
 
+/**
+ * Classic generateContent API — works with standard AI Studio keys when
+ * Interactions API returns 402/404/501.
+ */
+const generateWithContentApi = async ({
+  apiKey,
+  model,
+  systemInstruction,
+  userInput,
+  maxOutputTokens = 4096,
+  timeoutMs = GEMINI_REQUEST_TIMEOUT_MS,
+}) => {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const response = await fetchGemini(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents: [{ role: 'user', parts: [{ text: userInput }] }],
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens,
+          responseMimeType: 'application/json',
+        },
+      }),
+    },
+    timeoutMs
+  );
+
+  const payload = await parseGeminiResponseBody(response);
+  if (!response.ok) throwGeminiHttpError(response, payload);
+
+  const rawText =
+    payload?.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('\n') || '';
+  if (!rawText.trim()) {
+    const err = new Error('Gemini returned empty content');
+    err.statusCode = 502;
+    throw err;
+  }
+
+  const usageMeta = payload?.usageMetadata || {};
+  return {
+    rawText,
+    usage: {
+      promptTokens: usageMeta.promptTokenCount || 0,
+      outputTokens: usageMeta.candidatesTokenCount || 0,
+      totalTokens: usageMeta.totalTokenCount || 0,
+    },
+  };
+};
+
 const parseInteractionPayload = (payload = {}) => {
   const chunks = [];
   if (payload.output_text) chunks.push(String(payload.output_text));
@@ -462,69 +524,94 @@ export const generateAeoGeoContent = async ({
     .join('\n');
 
   const started = Date.now();
+  const systemInstruction = buildSystemPrompt(language, targetType);
 
-  const payload = await createGeminiInteraction({
-    apiKey: key,
-    timeoutMs: requestTimeoutMs,
-    body: {
-      model,
-      input: userInput,
-      system_instruction: buildSystemPrompt(language, targetType),
-      response_format: buildResponseFormat(targetType),
-      generation_config: {
-        max_output_tokens: effectiveMaxTokens,
-        thinking_level: thinkingLevel,
-      },
-    },
-  });
+  let data;
+  let usage = { promptTokens: 0, outputTokens: 0, totalTokens: 0 };
+  let rawText = '';
 
-  const latencyMs = Date.now() - started;
-
-  if (payload.status === 'failed') {
-    const msg = payload?.error?.message || 'Gemini interaction failed';
-    const err = new Error(msg);
-    err.statusCode = 502;
-    throw err;
-  }
-
-  const rawText = extractInteractionText(payload);
-
-  if (!rawText && payload.status !== 'completed') {
-    const err = new Error(
-      payload.status === 'incomplete'
-        ? 'Gemini returned incomplete content (try increasing max output tokens)'
-        : 'Gemini returned empty content'
-    );
-    err.statusCode = 502;
-    throw err;
-  }
-
-  let parsed;
   try {
-    parsed = rawText ? validateAeoPayload(parseGeminiJson(rawText)) : parseInteractionPayload(payload);
-  } catch (parseError) {
-    try {
-      parsed = parseInteractionPayload(payload);
-    } catch {
-      const err = new Error(parseError.message || 'Gemini response did not contain JSON');
+    const payload = await createGeminiInteraction({
+      apiKey: key,
+      timeoutMs: requestTimeoutMs,
+      body: {
+        model,
+        input: userInput,
+        system_instruction: systemInstruction,
+        response_format: buildResponseFormat(targetType),
+        generation_config: {
+          max_output_tokens: effectiveMaxTokens,
+          thinking_level: thinkingLevel,
+        },
+      },
+    });
+
+    if (payload.status === 'failed') {
+      const msg = payload?.error?.message || 'Gemini interaction failed';
+      const err = new Error(msg);
       err.statusCode = 502;
       throw err;
     }
-  }
 
-  const data = parsed;
-  const usageMeta = payload?.usage || {};
+    rawText = extractInteractionText(payload);
 
-  return {
-    data: normalizeGenerated(data),
-    usage: {
+    if (!rawText && payload.status !== 'completed') {
+      const err = new Error(
+        payload.status === 'incomplete'
+          ? 'Gemini returned incomplete content (try increasing max output tokens)'
+          : 'Gemini returned empty content'
+      );
+      err.statusCode = 502;
+      throw err;
+    }
+
+    try {
+      data = rawText ? validateAeoPayload(parseGeminiJson(rawText)) : parseInteractionPayload(payload);
+    } catch (parseError) {
+      try {
+        data = parseInteractionPayload(payload);
+      } catch {
+        const err = new Error(parseError.message || 'Gemini response did not contain JSON');
+        err.statusCode = 502;
+        throw err;
+      }
+    }
+
+    const usageMeta = payload?.usage || {};
+    usage = {
       promptTokens: usageMeta.total_input_tokens || 0,
       outputTokens: usageMeta.total_output_tokens || 0,
       totalTokens: usageMeta.total_tokens || 0,
-    },
+    };
+    rawText = rawText || JSON.stringify(data);
+  } catch (interactionErr) {
+    const code = interactionErr.statusCode || 0;
+    // Interactions API often returns 402/404 on free AI Studio keys — fall back
+    if (![402, 404, 501].includes(code) && !/402|billing|payment|not found|not supported/i.test(interactionErr.message || '')) {
+      throw interactionErr;
+    }
+    console.warn('[Gemini] Interactions API failed (%s) — using generateContent fallback', code || interactionErr.message);
+    const fallback = await generateWithContentApi({
+      apiKey: key,
+      model,
+      systemInstruction,
+      userInput,
+      maxOutputTokens: effectiveMaxTokens,
+      timeoutMs: requestTimeoutMs,
+    });
+    rawText = fallback.rawText;
+    usage = fallback.usage;
+    data = validateAeoPayload(parseGeminiJson(rawText));
+  }
+
+  const latencyMs = Date.now() - started;
+
+  return {
+    data: normalizeGenerated(data),
+    usage,
     model,
     latencyMs,
-    rawText: rawText || JSON.stringify(data),
+    rawText,
   };
 };
 

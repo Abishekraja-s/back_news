@@ -53,6 +53,25 @@ export const COMMENT_STATUS = {
   REJECTED: 'REJECTED',
 };
 
+export const CATEGORY_AD_SLUGS = [
+  'tamil-nadu',
+  'chennai',
+  'india',
+  'world',
+  'politics',
+  'business',
+  'sports',
+  'cinema',
+  'technology',
+  'education',
+  'jobs',
+  'spiritual',
+  'special',
+];
+
+/** Banner under each homepage category section title */
+export const CATEGORY_AD_POSITIONS = CATEGORY_AD_SLUGS.map((slug) => `category_${slug}`);
+
 export const AD_POSITIONS = [
   'header',
   'top_banner',
@@ -64,6 +83,8 @@ export const AD_POSITIONS = [
   'article_bottom',
   'footer',
   'mobile_sticky',
+  'category_below',
+  ...CATEGORY_AD_POSITIONS,
 ];
 
 /** AdSense placement locations (includes custom) */

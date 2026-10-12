@@ -45,6 +45,8 @@ import rssIngestRoutes from './routes/rssIngestRoutes.js';
 import shareRoutes from './routes/shareRoutes.js';
 import astrologyRoutes from './routes/astrologyRoutes.js';
 import { startAstrologySyncJob } from './jobs/astrologySyncJob.js';
+import examQuizRoutes from './routes/examQuizRoutes.js';
+import eventGifRoutes from './routes/eventGifRoutes.js';
 
 dotenv.config();
 
@@ -144,6 +146,8 @@ app.use('/api/government-notifications', governmentNotificationRoutes);
 app.use('/api/rss-ingest', rssIngestRoutes);
 app.use('/api/matrimony', matrimonyRoutes);
 app.use('/api/astrology', astrologyRoutes);
+app.use('/api/exams', examQuizRoutes);
+app.use('/api/event-gifs', eventGifRoutes);
 app.use('/api/pages', pageContentRoutes);
 app.use('/share', shareRoutes);
 app.use('/api/share', shareRoutes);

@@ -7,6 +7,7 @@
 
 import { TAMIL_NADU_DISTRICTS } from './tamilNaduDistricts.js';
 import { DEFAULT_TN_FUEL_DISTRICTS } from './tamilNaduFuelSlugs.js';
+import { getDefaultTrafficConfig } from '../services/trafficService.js';
 
 export const FEATURE_CATEGORIES = [
   'utilities',
@@ -73,7 +74,7 @@ export const DEFAULT_FEATURES = [
     key: 'currency',
     name: 'Currency',
     nameTamil: 'நாணயம்',
-    description: 'USD / INR exchange rate',
+    description: 'Live foreign exchange rates vs Indian Rupee',
     category: 'utilities',
     icon: 'currency',
     status: 'live',
@@ -83,15 +84,17 @@ export const DEFAULT_FEATURES = [
     colSpan: 2,
     config: {
       pair: 'USD / INR',
+      highlight: 'USD',
       rate: 83.42,
       changePercent: 0.15,
+      auto_update: true,
     },
   },
   {
     key: 'market',
     name: 'Market',
     nameTamil: 'சந்தை',
-    description: 'NIFTY 50 index',
+    description: 'Live Indian and global stock indexes',
     category: 'utilities',
     icon: 'chart',
     status: 'live',
@@ -101,8 +104,10 @@ export const DEFAULT_FEATURES = [
     colSpan: 2,
     config: {
       index: 'NIFTY 50',
+      highlight: 'NIFTY 50',
       value: 22450.3,
       changePercent: 0.85,
+      auto_update: true,
     },
   },
   {
@@ -134,7 +139,7 @@ export const DEFAULT_FEATURES = [
     key: 'traffic',
     name: 'Traffic',
     nameTamil: 'போக்குவரத்து',
-    description: 'City traffic status',
+    description: 'Live Tamil Nadu district and city-area traffic',
     category: 'utilities',
     icon: 'traffic',
     status: 'live',
@@ -142,12 +147,7 @@ export const DEFAULT_FEATURES = [
     order: 60,
     row: 1,
     colSpan: 2,
-    config: {
-      city: 'Chennai',
-      statusLabel: 'Normal',
-      detail: 'No major congestion',
-      level: 'normal',
-    },
+    config: getDefaultTrafficConfig(),
   },
 
   // Row 2 — news + alerts
@@ -262,7 +262,7 @@ export const DEFAULT_FEATURES = [
     key: 'local_updates',
     name: 'Local Updates',
     nameTamil: 'உள்ளூர் புதுப்பிப்புகள்',
-    description: 'Water, power, metro, AQI',
+    description: 'Live water, power, metro and AQI for Chennai',
     category: 'community',
     icon: 'pin',
     status: 'live',
@@ -417,7 +417,7 @@ export const DEMO_FEATURE_ITEMS = [
     titleTamil: '5 கேள்வி',
     icon: 'quiz',
     color: '#2563eb',
-    link: '/explore/news_quiz',
+    link: '/explore/exams',
     meta: { slug: 'quiz' },
     priority: 9,
   },
@@ -428,7 +428,7 @@ export const DEMO_FEATURE_ITEMS = [
     titleTamil: 'பங்குகள்',
     icon: 'chart',
     color: '#16a34a',
-    link: '/explore/daily_dose',
+    link: '/explore/stocks',
     meta: { slug: 'stocks' },
     priority: 8,
   },
@@ -439,7 +439,7 @@ export const DEMO_FEATURE_ITEMS = [
     titleTamil: 'வரலாற்றில் இன்று',
     icon: 'history',
     color: '#ea580c',
-    link: '/explore/daily_dose',
+    link: '/explore/today-in-history',
     meta: { slug: 'history' },
     priority: 7,
   },
@@ -450,7 +450,7 @@ export const DEMO_FEATURE_ITEMS = [
     titleTamil: 'விளையாட்டு',
     icon: 'game',
     color: '#db2777',
-    link: '/explore/daily_dose',
+    link: '/explore/random-game',
     meta: { slug: 'game' },
     priority: 6,
   },

@@ -49,6 +49,39 @@ export const syncFeatures = async ({ seedDemo = true } = {}) => {
   await SiteFeature.updateOne({ key: 'jobs' }, { $set: { enabled: false, status: 'disabled' } });
   await FeatureItem.updateMany({ featureKey: 'jobs' }, { $set: { isActive: false } });
 
+  await FeatureItem.updateMany(
+    { featureKey: 'daily_dose', $or: [{ 'meta.slug': 'game' }, { title: 'Random Game' }] },
+    { $set: { link: '/explore/random-game', titleTamil: 'விளையாட்டு', icon: 'game', meta: { slug: 'game' }, isActive: true } }
+  );
+  await FeatureItem.updateMany(
+    { featureKey: 'daily_dose', $or: [{ 'meta.slug': 'stocks' }, { title: 'Stock Watchlist' }] },
+    { $set: { link: '/explore/stocks', meta: { slug: 'stocks' }, isActive: true } }
+  );
+  await FeatureItem.updateMany(
+    { featureKey: 'daily_dose', $or: [{ 'meta.slug': 'quiz' }, { title: 'Daily Quiz' }] },
+    {
+      $set: {
+        link: '/explore/exams',
+        titleTamil: '5 கேள்வி',
+        icon: 'quiz',
+        meta: { slug: 'quiz' },
+        isActive: true,
+      },
+    }
+  );
+  await FeatureItem.updateMany(
+    { featureKey: 'daily_dose', $or: [{ 'meta.slug': 'history' }, { title: 'Today in History' }] },
+    {
+      $set: {
+        link: '/explore/today-in-history',
+        titleTamil: 'வரலாற்றில் இன்று',
+        icon: 'history',
+        meta: { slug: 'history' },
+        isActive: true,
+      },
+    }
+  );
+
   // Point Daily Dose horoscope card to Astrology module (replace old Tamil label)
   await FeatureItem.updateMany(
     {

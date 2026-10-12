@@ -151,16 +151,26 @@ matrimonyProfileSchema.index({
   currentLocation: 'text',
 });
 
-matrimonyProfileSchema.pre('validate', function calcAge(next) {
-  if (this.dateOfBirth) {
-    const dob = new Date(this.dateOfBirth);
-    if (!Number.isNaN(dob.getTime())) {
-      const today = new Date();
-      let age = today.getFullYear() - dob.getFullYear();
-      const m = today.getMonth() - dob.getMonth();
-      if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age -= 1;
-      this.age = age;
-    }
+matrimonyProfileSchema.pre('validate', function calcAgeHook(next) {
+  if (!this.dateOfBirth) {
+    this.invalidate('dateOfBirth', 'Date of birth is required');
+    return next();
+  }
+  const dob = new Date(this.dateOfBirth);
+  if (Number.isNaN(dob.getTime())) {
+    this.invalidate('dateOfBirth', 'Enter a valid date of birth');
+    return next();
+  }
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age -= 1;
+  if (!Number.isFinite(age) || age < 18) {
+    this.invalidate('age', 'Age must be 18 or above. Check the date of birth.');
+  } else if (age > 100) {
+    this.invalidate('age', 'Enter a valid date of birth');
+  } else {
+    this.age = age;
   }
   next();
 });

@@ -11,7 +11,7 @@ import { sanitizeContent } from '../utils/sanitize.js';
 import { generateSlug } from '../utils/helpers.js';
 import { invalidateRssCache } from './rssFeedService.js';
 import { enrichRssItem } from './articleEnrichmentService.js';
-import { translateNewsToTamil } from './rssTranslateService.js';
+import { translateNewsToTamil, hasTamil } from './rssTranslateService.js';
 
 const decodeXml = (s = '') =>
   String(s)
@@ -326,20 +326,33 @@ const prepareItemForArticle = async (item, source) => {
 
   let translated = false;
   if (source.translateToTamil !== false) {
-    try {
+    const runTranslate = async () => {
       const ta = await translateNewsToTamil({
         title,
         excerpt,
         content: fullPlain || excerpt,
       });
-      if (ta?.title) {
+      if (ta?.title && hasTamil(ta.title)) {
         title = ta.title;
         excerpt = ta.excerpt || excerpt;
         contentHtml = ta.contentHtml || contentHtml;
         translated = true;
+        return true;
+      }
+      return false;
+    };
+    try {
+      const ok = await runTranslate();
+      if (!ok) {
+        // brief pause then one more attempt (rate-limit recovery)
+        await new Promise((r) => setTimeout(r, 1200));
+        await runTranslate();
       }
     } catch (err) {
       console.warn('[RssIngest] Tamil translate failed:', err.message);
+    }
+    if (!translated) {
+      console.warn('[RssIngest] Tamil missing after retries — stored English:', title.slice(0, 80));
     }
   }
 
@@ -451,6 +464,10 @@ export const ingestFeedSource = async (source, { userId } = {}) => {
         if (userId) payload.createdBy = userId;
         await Article.create(payload);
         counts.created += 1;
+        // Pace free translators between items during bulk fetch
+        if (source.translateToTamil !== false) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
       } catch (err) {
         counts.errors += 1;
         console.warn('[RssIngest] item error:', err.message);

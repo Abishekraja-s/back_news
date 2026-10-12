@@ -4,6 +4,14 @@ import { DEFAULT_FEATURES } from '../config/features.js';
 import { fetchLiveWeather, fetchDistrictsWeather } from '../services/weatherService.js';
 import { fetchLiveGoldPrice } from '../services/goldPriceService.js';
 import { fetchLiveFuel, fetchDistrictsFuel } from '../services/fuelPriceService.js';
+import { fetchLiveCurrency } from '../services/currencyService.js';
+import { fetchLiveMarket } from '../services/marketService.js';
+import { fetchLiveTraffic } from '../services/trafficService.js';
+import { fetchLiveLocalUpdates } from '../services/localUpdatesService.js';
+import { fetchTodayInHistory } from '../services/historyService.js';
+import { fetchLiveStockWatchlist } from '../services/stockWatchlistService.js';
+import { fetchLiveTrending } from '../services/trendingService.js';
+import { fetchLiveCommunityFeed } from '../services/communityFeedService.js';
 import { findDistrict } from '../config/tamilNaduDistricts.js';
 import { fuelDistrictSlug } from '../config/tamilNaduFuelSlugs.js';
 
@@ -178,6 +186,228 @@ export const getLiveGoldPrice = async (req, res, next) => {
     res.status(502).json({
       success: false,
       message: error.message || 'Could not fetch live gold price',
+    });
+  }
+};
+
+/** Live FX rates vs INR (public) */
+export const getLiveCurrency = async (req, res, next) => {
+  try {
+    let config = {};
+    const feature = await SiteFeature.findOne({ key: 'currency' }).lean();
+    if (feature?.config) config = { ...feature.config };
+
+    const data = await fetchLiveCurrency(config, { force: req.query.refresh === '1' });
+    res.json({ success: true, data });
+  } catch (error) {
+    try {
+      const feature = await SiteFeature.findOne({ key: 'currency' }).lean();
+      const c = feature?.config || {};
+      if (c.pair || c.rate) {
+        return res.json({
+          success: true,
+          fallback: true,
+          data: {
+            pair: c.pair || 'USD / INR',
+            rate: c.rate,
+            changePercent: c.changePercent,
+            rates: Array.isArray(c.rates) ? c.rates : [
+              { code: 'USD', pair: c.pair || 'USD / INR', name: 'US Dollar', rate: c.rate, changePercent: c.changePercent },
+            ],
+            source: 'config',
+            note: 'Admin configured rate',
+          },
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+    res.status(502).json({
+      success: false,
+      message: error.message || 'Could not fetch live currency rates',
+    });
+  }
+};
+
+/** Live stock indexes (public) */
+export const getLiveMarket = async (req, res, next) => {
+  try {
+    let config = {};
+    const feature = await SiteFeature.findOne({ key: 'market' }).lean();
+    if (feature?.config) config = { ...feature.config };
+
+    const data = await fetchLiveMarket(config, { force: req.query.refresh === '1' });
+    res.json({ success: true, data });
+  } catch (error) {
+    try {
+      const feature = await SiteFeature.findOne({ key: 'market' }).lean();
+      const c = feature?.config || {};
+      if (c.index || c.value) {
+        return res.json({
+          success: true,
+          fallback: true,
+          data: {
+            index: c.index || 'NIFTY 50',
+            value: c.value,
+            changePercent: c.changePercent,
+            indexes: Array.isArray(c.indexes)
+              ? c.indexes
+              : [{ name: c.index || 'NIFTY 50', value: c.value, changePercent: c.changePercent, region: 'India' }],
+            source: 'config',
+            note: 'Admin configured value',
+          },
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+    res.status(502).json({
+      success: false,
+      message: error.message || 'Could not fetch live market indexes',
+    });
+  }
+};
+
+/** Live Tamil Nadu traffic by area (public) */
+export const getLiveTraffic = async (req, res, next) => {
+  try {
+    let config = {};
+    const feature = await SiteFeature.findOne({ key: 'traffic' }).lean();
+    if (feature?.config) config = { ...feature.config };
+
+    const data = await fetchLiveTraffic(config, { force: req.query.refresh === '1' });
+    res.json({ success: true, data });
+  } catch (error) {
+    try {
+      const feature = await SiteFeature.findOne({ key: 'traffic' }).lean();
+      const c = feature?.config || {};
+      if (c.city || c.statusLabel) {
+        return res.json({
+          success: true,
+          fallback: true,
+          data: {
+            city: c.city || 'Chennai',
+            statusLabel: c.statusLabel || 'Normal',
+            detail: c.detail || 'No major congestion',
+            level: c.level || 'normal',
+            highlight: String(c.city || 'chennai').toLowerCase().replace(/\s+/g, '-'),
+            areas: Array.isArray(c.areas)
+              ? c.areas
+              : [{ name: c.city || 'Chennai', city: c.city || 'Chennai', statusLabel: c.statusLabel, detail: c.detail, level: c.level, region: 'Tamil Nadu' }],
+            source: 'config',
+            note: 'Admin configured status',
+          },
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+    res.status(502).json({
+      success: false,
+      message: error.message || 'Could not fetch live traffic',
+    });
+  }
+};
+
+/** Live local civic updates — water, power, metro, AQI (public) */
+export const getLiveLocalUpdates = async (req, res, next) => {
+  try {
+    let config = {};
+    const feature = await SiteFeature.findOne({ key: 'local_updates' }).lean();
+    if (feature?.config) config = { ...feature.config };
+
+    const data = await fetchLiveLocalUpdates(config, { force: req.query.refresh === '1' });
+    res.json({ success: true, data });
+  } catch (error) {
+    try {
+      const feature = await SiteFeature.findOne({ key: 'local_updates' }).lean();
+      const items = await FeatureItem.find({ featureKey: 'local_updates', isActive: true }).lean();
+      if (items.length) {
+        return res.json({
+          success: true,
+          fallback: true,
+          data: {
+            city: feature?.config?.city || 'Chennai',
+            items: items.map((item) => ({
+              key: item.slug || item._id,
+              title: item.title,
+              titleTamil: item.titleTamil,
+              status: item.meta?.status,
+              detail: item.meta?.detail,
+              extra: item.subtitle || '',
+              tone: 'slate',
+            })),
+            source: 'config',
+            note: 'Admin configured updates',
+          },
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+    res.status(502).json({
+      success: false,
+      message: error.message || 'Could not fetch local updates',
+    });
+  }
+};
+
+/** Live Today in History (public) */
+export const getLiveTodayInHistory = async (req, res, next) => {
+  try {
+    const data = await fetchTodayInHistory({ force: req.query.refresh === '1' });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(502).json({
+      success: false,
+      message: error.message || 'Could not fetch today in history',
+    });
+  }
+};
+
+/** Live Trending Now — daily auto-update (public) */
+export const getLiveTrending = async (req, res, next) => {
+  try {
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const data = await fetchLiveTrending({
+      force: req.query.refresh === '1',
+      limit,
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(502).json({
+      success: false,
+      message: error.message || 'Could not fetch trending topics',
+    });
+  }
+};
+
+/** Live From Our Community — daily auto-update (public) */
+export const getLiveCommunityFeed = async (req, res, next) => {
+  try {
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const data = await fetchLiveCommunityFeed({
+      force: req.query.refresh === '1',
+      limit,
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(502).json({
+      success: false,
+      message: error.message || 'Could not fetch community feed',
+    });
+  }
+};
+
+/** Live NSE stock watchlist (public) */
+export const getLiveStockWatchlist = async (req, res, next) => {
+  try {
+    const data = await fetchLiveStockWatchlist({ force: req.query.refresh === '1' });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(502).json({
+      success: false,
+      message: error.message || 'Could not fetch stock watchlist',
     });
   }
 };

@@ -19,10 +19,13 @@ import {
   getPublicProfile,
   getPublicCategories,
   registerMatrimonyMember,
+  sendMatrimonyRegisterOtp,
+  verifyMatrimonyRegisterOtp,
   getMyProfile,
   createMyProfile,
   updateMyProfile,
   deleteMyProfile,
+  rollbackIncompleteRegistration,
   createEnquiry,
   getMySubmittedEnquiries,
   getReceivedEnquiries,
@@ -98,11 +101,40 @@ router.post(
 );
 
 // Member portal
+router.post('/member/register/send-otp', sendMatrimonyRegisterOtp);
+router.post('/member/register/verify-otp', verifyMatrimonyRegisterOtp);
 router.post('/member/register', registerMatrimonyMember);
+router.post(
+  '/member/register/upload',
+  upload.single('file'),
+  (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+    res.json({
+      success: true,
+      data: { url: `/uploads/${req.file.filename}`, filename: req.file.filename },
+    });
+  }
+);
+router.post(
+  '/member/register/upload-document',
+  uploadDocument.single('file'),
+  (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+    res.json({
+      success: true,
+      data: { url: `/uploads/${req.file.filename}`, filename: req.file.filename },
+    });
+  }
+);
 router.get('/member/profile', protect, authorize(ROLES.MATRIMONY), getMyProfile);
 router.post('/member/profile', protect, authorize(ROLES.MATRIMONY), createMyProfile);
 router.put('/member/profile', protect, authorize(ROLES.MATRIMONY), updateMyProfile);
 router.delete('/member/profile', protect, authorize(ROLES.MATRIMONY), deleteMyProfile);
+router.delete('/member/incomplete', protect, authorize(ROLES.MATRIMONY), rollbackIncompleteRegistration);
 router.get('/member/enquiries', protect, authorize(ROLES.MATRIMONY), getMySubmittedEnquiries);
 router.get('/member/enquiries/received', protect, authorize(ROLES.MATRIMONY), getReceivedEnquiries);
 router.put('/member/enquiries/:id', protect, authorize(ROLES.MATRIMONY), updateReceivedEnquiry);

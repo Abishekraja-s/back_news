@@ -60,6 +60,9 @@ export const findDistrict = (query) => {
   if (!q) return null;
   if (slugIndex.has(q)) return slugIndex.get(q);
   if (nameIndex.has(q)) return nameIndex.get(q);
+  if (q === 'kanyakumari' || q === 'kanniyakumari') return nameIndex.get('kanniyakumari') || slugIndex.get('kanniyakumari');
+  if (q === 'trichy' || q === 'tiruchi') return nameIndex.get('tiruchirappalli') || slugIndex.get('tiruchirappalli');
+  if (q === 'tuticorin') return nameIndex.get('thoothukudi') || slugIndex.get('thoothukudi');
   return TAMIL_NADU_DISTRICTS.find((d) => d.district.toLowerCase() === q) || null;
 };
 

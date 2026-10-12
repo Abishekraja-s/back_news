@@ -7,15 +7,16 @@ export const AEO_PAGE_STATUS = ['draft', 'optimized', 'needs_work', 'indexed', '
 export const AEO_ENTITY_TYPES = ['person', 'place', 'organization', 'topic', 'event', 'product', 'other'];
 
 export const GEMINI_MODELS = [
+  'gemini-3.8-flash',
   'gemini-3.6-flash',
   'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
 ];
 
 /** Legacy model IDs mapped to current GA equivalents */
 export const GEMINI_DEPRECATED_MODELS = {
+  'gemini-2.5-flash': 'gemini-3.8-flash',
+  'gemini-2.5-pro': 'gemini-3.8-flash',
   'gemini-2.0-flash': 'gemini-3.6-flash',
   'gemini-1.5-flash': 'gemini-3.6-flash',
   'gemini-1.5-pro': 'gemini-3.6-flash',
@@ -88,7 +89,7 @@ export const DEFAULT_AEO_CONFIG = {
   titleMax: 60,
   // Gemini (key stored separately — never in this object returned raw)
   geminiEnabled: true,
-  geminiModel: 'gemini-3.6-flash',
+  geminiModel: 'gemini-3.8-flash',
   geminiLanguage: 'ta',
   geminiThinkingLevel: 'medium',
   geminiTemperature: 0.7,

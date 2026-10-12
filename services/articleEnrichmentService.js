@@ -255,7 +255,35 @@ export const enrichRssItem = async (item, options = {}) => {
 
   if (needsImage && meta.image) enriched.image = meta.image;
   if (meta.resolvedUrl && !isGoogleNewsWrapper(meta.resolvedUrl)) {
-    enriched.sourceUrl = enriched.sourceUrl || meta.resolvedUrl;
+    // Prefer full publisher article URL over RSS <source> homepage (e.g. https://www.ndtv.com)
+    let weakSource = true;
+    try {
+      const existing = new URL(String(enriched.sourceUrl || ''));
+      weakSource = !existing.pathname || existing.pathname === '/';
+    } catch {
+      weakSource = true;
+    }
+    if (!enriched.sourceUrl || weakSource) enriched.sourceUrl = meta.resolvedUrl;
+  }
+
+  // One retry when Google/publisher rate-limits leave us without an image
+  if (needsImage && !enriched.image) {
+    await sleep(900);
+    const retry = await enrichArticleFromUrl(enriched.link);
+    if (retry?.image) enriched.image = retry.image;
+    if (retry?.content && retry.content.length > String(enriched.content || '').length) {
+      enriched.content = retry.content;
+    }
+    if (retry?.resolvedUrl && !isGoogleNewsWrapper(retry.resolvedUrl)) {
+      let weakSource = true;
+      try {
+        const existing = new URL(String(enriched.sourceUrl || ''));
+        weakSource = !existing.pathname || existing.pathname === '/';
+      } catch {
+        weakSource = true;
+      }
+      if (!enriched.sourceUrl || weakSource) enriched.sourceUrl = retry.resolvedUrl;
+    }
   }
 
   const metaContent = String(meta.content || '').trim();

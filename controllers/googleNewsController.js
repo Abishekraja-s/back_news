@@ -635,37 +635,56 @@ export const getRelatedPublic = async (req, res, next) => {
 /** Re-fetch images and content for existing items missing data (skips adminEdited) */
 export const enrichExistingItems = async (req, res, next) => {
   try {
-    const limit = Math.min(parseInt(req.body.limit, 10) || 30, 50);
-    const items = await GoogleNewsItem.find({
+    const limit = Math.min(parseInt(req.body.limit, 10) || 60, 120);
+    // Prefer rows missing real images so admin thumbnails catch up first
+    const missingImage = {
       adminEdited: { $ne: true },
       $or: [
         { image: { $in: ['', null] } },
         { image: /picsum\.photos/i },
         { image: /googleusercontent\.com/i },
-        { description: /Comprehensive, up-to-date news coverage/i },
-        { content: /function\s+\w+\s*\(/i },
-        { content: /\{\s*display\s*:/i },
-        { content: /"@context"/i },
-        { description: /<[a-z][\s>]/i },
-        { $expr: { $lt: [{ $strLenCP: { $ifNull: ['$content', ''] } }, 120] } },
       ],
-    })
+    };
+    let items = await GoogleNewsItem.find(missingImage)
       .sort({ publishedAt: -1 })
       .limit(limit);
 
+    if (items.length < limit) {
+      const extra = await GoogleNewsItem.find({
+        adminEdited: { $ne: true },
+        _id: { $nin: items.map((i) => i._id) },
+        $or: [
+          { description: /Comprehensive, up-to-date news coverage/i },
+          { content: /function\s+\w+\s*\(/i },
+          { content: /\{\s*display\s*:/i },
+          { content: /"@context"/i },
+          { description: /<[a-z][\s>]/i },
+          { $expr: { $lt: [{ $strLenCP: { $ifNull: ['$content', ''] } }, 120] } },
+        ],
+      })
+        .sort({ publishedAt: -1 })
+        .limit(limit - items.length);
+      items = [...items, ...extra];
+    }
+
     let updated = 0;
+    let imagesFixed = 0;
     for (const item of items) {
       const meta = await enrichRssItem({
         link: item.link,
-        image: item.image?.includes('picsum') ? '' : item.image,
+        image: isGenericGoogleImage(item.image) || item.image?.includes('picsum') ? '' : item.image,
         description: item.description,
         descriptionHtml: item.descriptionHtml,
         content: item.content,
         excerpt: item.excerpt,
+        sourceUrl: item.sourceUrl,
       });
 
       const patch = {};
-      if (meta.image && isValidImageUrl(meta.image) && !isGenericGoogleImage(meta.image)) patch.image = meta.image;
+      if (meta.image && isValidImageUrl(meta.image) && !isGenericGoogleImage(meta.image)) {
+        patch.image = meta.image;
+        imagesFixed += 1;
+      }
 
       const textFields = prepareGoogleNewsTextFields({
         description: meta.description || item.description,
@@ -682,6 +701,16 @@ export const enrichExistingItems = async (req, res, next) => {
         patch.description = textFields.description;
       }
       if (!patch.excerpt && textFields.excerpt) patch.excerpt = textFields.excerpt;
+      if (meta.sourceUrl) {
+        let weak = true;
+        try {
+          const u = new URL(String(item.sourceUrl || ''));
+          weak = !u.pathname || u.pathname === '/';
+        } catch {
+          weak = true;
+        }
+        if (!item.sourceUrl || weak) patch.sourceUrl = meta.sourceUrl;
+      }
       if (Object.keys(patch).length) {
         await GoogleNewsItem.updateOne({ _id: item._id }, { $set: patch });
         updated += 1;
@@ -690,8 +719,8 @@ export const enrichExistingItems = async (req, res, next) => {
 
     res.json({
       success: true,
-      message: `Enriched ${updated} of ${items.length} items with publisher images/content`,
-      data: { processed: items.length, updated },
+      message: `Enriched ${updated} of ${items.length} items (${imagesFixed} images)`,
+      data: { processed: items.length, updated, imagesFixed },
     });
   } catch (error) {
     next(error);

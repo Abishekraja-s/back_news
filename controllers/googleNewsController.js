@@ -503,6 +503,27 @@ export const getPublicItems = async (req, res, next) => {
   }
 };
 
+/** Public must-read / must-watch picks for article sidebars */
+export const getPublicMustPicks = async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 6, 20);
+    const flag = String(req.query.flag || 'must-read').toLowerCase();
+    const filter = { ...publishedFilter };
+    if (flag === 'must-watch') filter.isMustWatch = true;
+    else filter.isMustRead = true;
+
+    const items = await GoogleNewsItem.find(filter)
+      .sort({ displayOrder: 1, publishedAt: -1 })
+      .limit(limit)
+      .select('title slug image sourceName publishedAt isMustRead isMustWatch')
+      .lean();
+
+    res.json({ success: true, data: items.map(sanitizeItemForListing) });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getPublicList = async (req, res, next) => {
   try {
     const config = await getOrCreateConfig();

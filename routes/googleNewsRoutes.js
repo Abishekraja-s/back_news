@@ -13,6 +13,7 @@ import {
   deleteItemsByDate,
   getPublicItems,
   getPublicList,
+  getPublicMustPicks,
   getPublicBySlug,
   getRelatedPublic,
   enrichExistingItems,
@@ -25,6 +26,7 @@ const managers = [ROLES.SUPER_ADMIN, ROLES.EDITOR];
 
 router.get('/public', getPublicItems);
 router.get('/public/list', getPublicList);
+router.get('/public/must-picks', getPublicMustPicks);
 router.get('/public/slug/:slug/related', getRelatedPublic);
 router.get('/public/slug/:slug', getPublicBySlug);
 

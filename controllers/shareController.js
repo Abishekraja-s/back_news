@@ -43,24 +43,32 @@ const getApiPublicUrl = (req) => {
   return `${proto}://${host}`.replace(/^http:/i, 'https:');
 };
 
+const toBase64Url = (s) =>
+  Buffer.from(String(s), 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+
 /** Absolute HTTPS image URL for WhatsApp / Facebook / Telegram crawlers */
 export const toAbsoluteImageUrl = (image, req, seed = 'news') => {
-  const fallback = `https://picsum.photos/seed/${encodeURIComponent(seed)}/1200/630`;
+  const site = getSiteUrl();
+  const fallback = `${site}/assets/images/default-og-image.jpg`;
   if (!image || !String(image).trim()) return fallback;
   let img = String(image).trim();
   if (/^http:\/\//i.test(img)) img = img.replace(/^http:/i, 'https:');
-  // Prefer social-card dimensions for placeholder images
-  if (img.includes('picsum.photos') && /\/\d+\/\d+/.test(img)) {
-    img = img.replace(/\/\d+\/\d+/, '/1200/630');
-  }
   if (/^https:\/\/(localhost|127\.0\.0\.1)/i.test(img)) {
     const path = img.replace(/^https?:\/\/[^/]+/i, '');
-    return `${getApiPublicUrl(req)}${path}`;
+    img = `${getApiPublicUrl(req)}${path}`;
+  } else if (!/^https:\/\//i.test(img)) {
+    const api = getApiPublicUrl(req);
+    img = img.startsWith('/') ? `${api}${img}` : `${api}/${img}`;
   }
-  if (/^https:\/\//i.test(img)) return img;
-  const api = getApiPublicUrl(req);
-  if (img.startsWith('/')) return `${api}${img}`;
-  return `${api}/${img}`;
+  if (!img.startsWith('https://')) return fallback;
+  // Same-origin path proxy (no ?query) — WhatsApp can fetch picsum/CDN via our domain
+  if (img.startsWith(site)) return img;
+  if (img.includes('onrender.com') && !/picsum\.photos/i.test(img)) return img;
+  return `${site}/og/img/${toBase64Url(img)}.jpg`;
 };
 
 const BOT_RE =

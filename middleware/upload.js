@@ -36,6 +36,46 @@ export const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
+/** Matrimony + Marketplace product photos — max 50 KB */
+export const MAX_PORTAL_IMAGE_BYTES = 50 * 1024;
+
+export const uploadImage50kb = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: MAX_PORTAL_IMAGE_BYTES },
+});
+
+export const portalImageUploadError = (err, req, res, next) => {
+  if (!err) return next();
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({
+      success: false,
+      message: 'Image must be 50 KB or less',
+    });
+  }
+  return res.status(400).json({
+    success: false,
+    message: err.message || 'Upload failed',
+  });
+};
+
+/** After multer: reject image documents over 50 KB (PDFs allowed larger) */
+export const rejectOversizedPortalImage = (req, res, next) => {
+  const file = req.file;
+  if (
+    file &&
+    String(file.mimetype || '').startsWith('image/') &&
+    file.size > MAX_PORTAL_IMAGE_BYTES
+  ) {
+    if (file.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+    return res.status(400).json({
+      success: false,
+      message: 'Image must be 50 KB or less',
+    });
+  }
+  next();
+};
+
 const documentFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   const allowedExt = ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.pdf'];
@@ -116,4 +156,44 @@ export const uploadBrandAsset = multer({
   storage: brandStorage,
   fileFilter: brandAssetFilter,
   limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+const apkDir = path.join(uploadDir, 'apk');
+if (!fs.existsSync(apkDir)) {
+  fs.mkdirSync(apkDir, { recursive: true });
+}
+
+const apkFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const mime = String(file.mimetype || '').toLowerCase();
+  const allowedMime = [
+    'application/vnd.android.package-archive',
+    'application/octet-stream',
+    'application/java-archive',
+  ];
+  if (ext === '.apk' && (allowedMime.includes(mime) || mime === '' || mime === 'application/zip')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only Android APK files (.apk) are allowed'), false);
+  }
+};
+
+const apkStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, apkDir),
+  filename: (req, file, cb) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const safeBase = String(file.originalname || 'app')
+      .replace(/\.apk$/i, '')
+      .replace(/[^a-z0-9-_]+/gi, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 40) || 'app';
+    cb(null, `${safeBase}-${unique}.apk`);
+  },
+});
+
+export const uploadAndroidApk = multer({
+  storage: apkStorage,
+  fileFilter: apkFilter,
+  limits: { fileSize: 150 * 1024 * 1024 },
 });

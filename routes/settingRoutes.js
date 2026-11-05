@@ -4,9 +4,10 @@ import {
   updateSettings,
   getPublicSettings,
   uploadBrandSetting,
+  uploadAndroidApkSetting,
 } from '../controllers/settingController.js';
 import { protect, authorize } from '../middleware/auth.js';
-import { uploadBrandAsset } from '../middleware/upload.js';
+import { uploadBrandAsset, uploadAndroidApk } from '../middleware/upload.js';
 import { ROLES } from '../config/constants.js';
 
 const router = express.Router();
@@ -30,6 +31,23 @@ router.post(
     });
   },
   uploadBrandSetting
+);
+router.post(
+  '/upload-apk',
+  protect,
+  authorize(ROLES.SUPER_ADMIN),
+  (req, res, next) => {
+    uploadAndroidApk.single('file')(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          message: err.message || 'APK upload failed',
+        });
+      }
+      next();
+    });
+  },
+  uploadAndroidApkSetting
 );
 
 export default router;

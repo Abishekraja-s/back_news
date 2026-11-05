@@ -11,6 +11,8 @@ const categorySchema = new mongoose.Schema(
     parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
     isDistrict: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
+    /** When true, category appears in site header / mobile menu nav */
+    showInHeader: { type: Boolean, default: true },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     seoTitle: { type: String, default: '' },
     metaDescription: { type: String, default: '' },

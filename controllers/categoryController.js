@@ -6,8 +6,13 @@ export const getCategories = async (req, res, next) => {
     if (req.query.status) query.status = req.query.status;
     if (req.query.districts === 'true') query.isDistrict = true;
     if (req.query.districts === 'false') query.isDistrict = false;
+    if (req.query.header === 'true') {
+      query.showInHeader = true;
+      query.status = query.status || 'active';
+    }
+    if (req.query.header === 'false') query.showInHeader = false;
 
-    const categories = await Category.find(query).sort({ order: 1 }).lean();
+    const categories = await Category.find(query).sort({ order: 1, nameTamil: 1 }).lean();
     res.json({ success: true, data: categories });
   } catch (error) {
     next(error);

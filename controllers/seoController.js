@@ -1,6 +1,7 @@
 import Article from '../models/Article.js';
 import Category from '../models/Category.js';
 import { ARTICLE_STATUS } from '../config/constants.js';
+import { getArticlePublicUrl } from '../utils/articleUrls.js';
 
 const getClientBaseUrl = () => {
   const url = process.env.CLIENT_URL || 'http://localhost:5173';
@@ -14,7 +15,8 @@ export const getSitemap = async (req, res, next) => {
       status: ARTICLE_STATUS.PUBLISHED,
       publishedAt: { $lte: new Date() },
     })
-      .select('slug updatedAt publishedAt')
+      .select('slug updatedAt publishedAt category')
+      .populate({ path: 'category', select: 'slug' })
       .sort({ publishedAt: -1 })
       .lean();
 
@@ -29,8 +31,10 @@ export const getSitemap = async (req, res, next) => {
       'astrology/rasi/kadagam', 'astrology/rasi/simmam', 'astrology/rasi/kanni',
       'astrology/rasi/thulam', 'astrology/rasi/viruchigam', 'astrology/rasi/dhanusu',
       'astrology/rasi/magaram', 'astrology/rasi/kumbam', 'astrology/rasi/meenam',
-      'india', 'world', 'politics', 'business', 'sports', 'cinema',
-      'technology', 'education', 'jobs', 'spiritual', 'special', 'tamil-nadu',
+      'district', 'politics', 'chennai', 'tamil-nadu', 'india', 'world',
+      'crime', 'pocso', 'spiritual', 'special', 'education', 'sports', 'jobs',
+      'agriculture', 'sri-lanka', 'business', 'health', 'short-news', 'weather',
+      'other-news',
     ];
 
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
@@ -49,7 +53,8 @@ export const getSitemap = async (req, res, next) => {
     });
 
     articles.forEach((article) => {
-      xml += `  <url><loc>${baseUrl}/news/${article.slug}</loc><lastmod>${article.updatedAt.toISOString()}</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>\n`;
+      const loc = getArticlePublicUrl(article, baseUrl);
+      xml += `  <url><loc>${loc}</loc><lastmod>${article.updatedAt.toISOString()}</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>\n`;
     });
 
     xml += '</urlset>';
@@ -70,7 +75,8 @@ export const getNewsSitemap = async (req, res, next) => {
       status: ARTICLE_STATUS.PUBLISHED,
       publishedAt: { $gte: twoDaysAgo, $lte: new Date() },
     })
-      .select('title slug publishedAt')
+      .select('title slug publishedAt category')
+      .populate({ path: 'category', select: 'slug' })
       .sort({ publishedAt: -1 })
       .lean();
 
@@ -80,7 +86,7 @@ export const getNewsSitemap = async (req, res, next) => {
 
     articles.forEach((article) => {
       xml += '  <url>\n';
-      xml += `    <loc>${baseUrl}/news/${article.slug}</loc>\n`;
+      xml += `    <loc>${getArticlePublicUrl(article, baseUrl)}</loc>\n`;
       xml += '    <news:news>\n';
       xml += '      <news:publication>\n';
       xml += '        <news:name>The Great India News</news:name>\n';

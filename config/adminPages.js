@@ -29,13 +29,14 @@ export const ADMIN_PAGES = [
   { key: 'menu-management', label: 'Menu Management', path: '/admin/page-menu' },
   { key: 'users', label: 'Users', path: '/admin/users' },
   { key: 'role-permissions', label: 'Role Permissions', path: '/admin/role-permissions' },
+  { key: 'database-backup', label: 'Database Backup', path: '/admin/database-backup' },
   { key: 'settings', label: 'Settings', path: '/admin/settings' },
 ];
 
 export const ALL_ADMIN_PAGE_KEYS = ADMIN_PAGES.map((p) => p.key);
 
 const editorPages = ALL_ADMIN_PAGE_KEYS.filter(
-  (k) => !['users', 'role-permissions', 'settings'].includes(k)
+  (k) => !['users', 'role-permissions', 'settings', 'database-backup'].includes(k)
 );
 
 export const DEFAULT_ROLE_PERMISSIONS = {

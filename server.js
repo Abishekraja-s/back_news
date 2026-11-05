@@ -47,6 +47,7 @@ import astrologyRoutes from './routes/astrologyRoutes.js';
 import { startAstrologySyncJob } from './jobs/astrologySyncJob.js';
 import examQuizRoutes from './routes/examQuizRoutes.js';
 import eventGifRoutes from './routes/eventGifRoutes.js';
+import databaseBackupRoutes from './routes/databaseBackupRoutes.js';
 
 dotenv.config();
 
@@ -64,7 +65,8 @@ app.use(
   })
 );
 
-const getAllowedOrigins = () => {  const urls = process.env.CLIENT_URL || 'http://localhost:5173';
+const getAllowedOrigins = () => {
+  const urls = process.env.CLIENT_URL || 'http://localhost:5173,http://localhost:5174';
   return urls.split(',').map((u) => u.trim()).filter(Boolean);
 };
 
@@ -72,16 +74,30 @@ app.use(
   cors({
     origin: (origin, callback) => {
       const allowed = getAllowedOrigins();
-      if (!origin || allowed.includes(origin) || allowed.includes('*')) {
+      // Dev: allow any localhost Vite port
+      const isLocal =
+        !origin ||
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+      if (!origin || allowed.includes(origin) || allowed.includes('*') || isLocal) {
         callback(null, true);
       } else {
         callback(null, allowed[0]);
       }
     },
     credentials: true,
+    exposedHeaders: ['Content-Disposition'],
   })
 );
-app.use(compression());
+app.use(
+  compression({
+    // Don't buffer large DB dumps — stream them raw (check originalUrl; req.path is mount-relative)
+    filter: (req, res) => {
+      const url = `${req.originalUrl || ''} ${req.url || ''} ${req.path || ''}`;
+      if (url.includes('database-backup')) return false;
+      return compression.filter(req, res);
+    },
+  })
+);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -148,6 +164,7 @@ app.use('/api/matrimony', matrimonyRoutes);
 app.use('/api/astrology', astrologyRoutes);
 app.use('/api/exams', examQuizRoutes);
 app.use('/api/event-gifs', eventGifRoutes);
+app.use('/api/database-backup', databaseBackupRoutes);
 app.use('/api/pages', pageContentRoutes);
 app.use('/share', shareRoutes);
 app.use('/api/share', shareRoutes);
@@ -193,7 +210,7 @@ const startServer = async () => {
     console.warn('Marketplace category seed skipped:', err.message);
   }
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`API: http://localhost:${PORT}/api/health`);
     startYoutubeFetchJob();
@@ -203,14 +220,20 @@ const startServer = async () => {
     startGovernmentFetchJob();
     startRssIngestJob();
     startAstrologySyncJob();
-  }).on('error', (err) => {
+  });
+  // Large DB backups can take several minutes to build + send
+  server.timeout = 0;
+  server.keepAliveTimeout = 120000;
+  server.headersTimeout = 125000;
+  server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`Port ${PORT} is already in use. Close the other process or change PORT in .env`);
     } else {
       console.error('Server error:', err.message);
     }
     process.exit(1);
-  });};
+  });
+};
 
 startServer().catch((err) => {
   console.error('Failed to start server:', err.message);

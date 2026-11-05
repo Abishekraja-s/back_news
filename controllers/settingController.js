@@ -43,6 +43,36 @@ const DEFAULT_SETTINGS = {
   smtpPassword: '',
   smtpFromName: 'The Great India News',
   smtpFromEmail: '',
+  androidAppApk: null,
+};
+
+const normalizeApkAsset = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const url = value.trim();
+    return url ? { url, fileName: path.basename(url), version: null } : null;
+  }
+  if (typeof value === 'object' && value.url) {
+    return {
+      url: value.url,
+      fileName: value.fileName || path.basename(value.url),
+      version: value.version || null,
+      mimeType: value.mimeType || 'application/vnd.android.package-archive',
+      size: value.size || null,
+    };
+  }
+  return null;
+};
+
+const deleteApkFile = (asset) => {
+  const parsed = normalizeApkAsset(asset);
+  if (!parsed?.url) return;
+  const marker = '/uploads/';
+  const idx = parsed.url.indexOf(marker);
+  if (idx === -1) return;
+  const rel = parsed.url.slice(idx + marker.length).split('?')[0];
+  const filePath = path.join(uploadDir, rel);
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 };
 
 export const normalizeBrandAsset = (value) => {
@@ -78,6 +108,7 @@ const buildSettingsResult = (stored = []) => {
   result.headerLogo = resolveHeaderLogo(map);
   result.footerLogo = normalizeBrandAsset(map.footerLogo);
   result.favicon = normalizeBrandAsset(map.favicon);
+  result.androidAppApk = normalizeApkAsset(map.androidAppApk);
 
   // Coerce analytics flag (Mixed type may be string/boolean)
   if (result.analyticsEnabled === 'false' || result.analyticsEnabled === false) {
@@ -152,6 +183,19 @@ export const updateSettings = async (req, res, next) => {
 
     for (const [key, value] of Object.entries(updates)) {
       if (BRAND_SETTING_KEYS.includes(key)) continue;
+      if (key === 'androidAppApk') {
+        // Clear APK when admin removes it from settings
+        if (!value) {
+          const existing = await Setting.findOne({ key: 'androidAppApk' });
+          deleteApkFile(existing?.value);
+          await Setting.findOneAndUpdate(
+            { key: 'androidAppApk' },
+            { key: 'androidAppApk', value: null, group: 'app' },
+            { upsert: true, new: true }
+          );
+        }
+        continue;
+      }
       const group = key.startsWith('smtp')
         ? 'email'
         : key.startsWith('google') || key === 'analyticsEnabled'
@@ -195,6 +239,7 @@ export const getPublicSettings = async (req, res, next) => {
           'googleAnalyticsPropertyId',
           'googleTagManagerId',
           'analyticsEnabled',
+          'androidAppApk',
         ],
       },
     });
@@ -256,6 +301,45 @@ export const uploadBrandSetting = async (req, res, next) => {
       data: {
         key: type,
         asset: normalizeBrandAsset(setting.value),
+      },
+    });
+  } catch (error) {
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    next(error);
+  }
+};
+
+export const uploadAndroidApkSetting = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No APK file uploaded' });
+    }
+
+    const existing = await Setting.findOne({ key: 'androidAppApk' });
+    deleteApkFile(existing?.value);
+
+    const asset = {
+      url: `/uploads/apk/${req.file.filename}`,
+      fileName: req.file.originalname || req.file.filename,
+      version: Date.now(),
+      mimeType: req.file.mimetype || 'application/vnd.android.package-archive',
+      size: req.file.size || null,
+    };
+
+    const setting = await Setting.findOneAndUpdate(
+      { key: 'androidAppApk' },
+      { key: 'androidAppApk', value: asset, group: 'app' },
+      { upsert: true, new: true }
+    );
+
+    res.json({
+      success: true,
+      message: 'Web app APK updated',
+      data: {
+        key: 'androidAppApk',
+        asset: normalizeApkAsset(setting.value),
       },
     });
   } catch (error) {

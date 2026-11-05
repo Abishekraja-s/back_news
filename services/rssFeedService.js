@@ -104,6 +104,13 @@ export const buildArticleUrl = (article, baseUrl, articlePath = 'post') => {
   if (article.canonicalUrl?.trim()) {
     return resolveAbsoluteUrl(article.canonicalUrl, baseUrl);
   }
+  const categorySlug =
+    typeof article?.category === 'object' && article.category?.slug
+      ? String(article.category.slug).trim()
+      : '';
+  if (categorySlug && article?.slug) {
+    return `${baseUrl}/${categorySlug}/${article.slug}`;
+  }
   const segment = String(articlePath || 'post').replace(/^\/+|\/+$/g, '') || 'post';
   return `${baseUrl}/${segment}/${article.slug}`;
 };

@@ -12,7 +12,7 @@ import {
   ROLES,
 } from '../config/constants.js';
 import { sendTokenResponse } from '../utils/generateToken.js';
-import { getClientBaseUrl, sendMail } from '../utils/mail.js';
+import { formatSmtpError, getClientBaseUrl, sendMail } from '../utils/mail.js';
 
 export const getOrCreateMatrimonyConfig = async () => {
   let config = await MatrimonyConfig.findOne({ key: 'default' });
@@ -1526,16 +1526,11 @@ export const sendMatrimonyRegisterOtp = async (req, res, next) => {
       });
     } catch (mailErr) {
       await MatrimonyRegistrationOtp.deleteMany({ email });
+      const message = formatSmtpError(mailErr);
       if (mailErr.code === 'SMTP_NOT_CONFIGURED') {
-        return res.status(503).json({
-          success: false,
-          message: 'Email is not set up yet. Ask the site admin to configure SMTP in Admin → Settings.',
-        });
+        return res.status(503).json({ success: false, message });
       }
-      return res.status(502).json({
-        success: false,
-        message: mailErr.message || 'Could not send OTP email. Check SMTP settings.',
-      });
+      return res.status(502).json({ success: false, message });
     }
 
     if (process.env.NODE_ENV !== 'production') {

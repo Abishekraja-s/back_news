@@ -108,9 +108,10 @@ export const getLatest = async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit) || 10, 30);
     const articles = await Article.find(getPublishedQuery())
       .populate(populateFields)
-      .sort({ publishedAt: -1 })
+      // Most recently updated first, then newest published
+      .sort({ updatedAt: -1, publishedAt: -1 })
       .limit(limit)
-      .select('title slug excerpt featuredImage category author publishedAt')
+      .select('title slug excerpt featuredImage imageAlt category author publishedAt updatedAt')
       .lean();
 
     res.json({ success: true, data: articles });

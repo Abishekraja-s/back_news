@@ -9,7 +9,7 @@ import {
   MARKETPLACE_ENQUIRY_STATUS,
 } from '../config/constants.js';
 import { sendTokenResponse } from '../utils/generateToken.js';
-import { sendMail } from '../utils/mail.js';
+import { formatSmtpError, sendMail } from '../utils/mail.js';
 
 const formatPrice = (n) =>
   `₹${Number(n || 0).toLocaleString('en-IN')}`;
@@ -163,16 +163,11 @@ export const sendSellerRegisterOtp = async (req, res, next) => {
       });
     } catch (mailErr) {
       await SellerRegistrationOtp.deleteMany({ email });
+      const message = formatSmtpError(mailErr);
       if (mailErr.code === 'SMTP_NOT_CONFIGURED') {
-        return res.status(503).json({
-          success: false,
-          message: 'Email is not set up yet. Ask the site admin to configure SMTP in Admin → Settings.',
-        });
+        return res.status(503).json({ success: false, message });
       }
-      return res.status(502).json({
-        success: false,
-        message: mailErr.message || 'Could not send OTP email. Check SMTP settings.',
-      });
+      return res.status(502).json({ success: false, message });
     }
 
     if (process.env.NODE_ENV !== 'production') {

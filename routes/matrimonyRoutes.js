@@ -36,7 +36,19 @@ import {
 } from '../controllers/matrimonyController.js';
 import { protect, authorize, optionalAuth } from '../middleware/auth.js';
 import { ROLES } from '../config/constants.js';
-import { upload, uploadDocument } from '../middleware/upload.js';
+import {
+  uploadImage50kb,
+  uploadDocument,
+  portalImageUploadError,
+  rejectOversizedPortalImage,
+} from '../middleware/upload.js';
+
+const matrimonyPhotoUpload = (req, res, next) => {
+  uploadImage50kb.single('file')(req, res, (err) => {
+    if (err) return portalImageUploadError(err, req, res, next);
+    next();
+  });
+};
 
 const router = express.Router();
 const managers = [ROLES.SUPER_ADMIN, ROLES.EDITOR];
@@ -72,7 +84,7 @@ router.post(
   '/admin/upload',
   protect,
   authorize(...managers),
-  upload.single('file'),
+  matrimonyPhotoUpload,
   (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -89,6 +101,7 @@ router.post(
   protect,
   authorize(...managers),
   uploadDocument.single('file'),
+  rejectOversizedPortalImage,
   (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -106,7 +119,7 @@ router.post('/member/register/verify-otp', verifyMatrimonyRegisterOtp);
 router.post('/member/register', registerMatrimonyMember);
 router.post(
   '/member/register/upload',
-  upload.single('file'),
+  matrimonyPhotoUpload,
   (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -120,6 +133,7 @@ router.post(
 router.post(
   '/member/register/upload-document',
   uploadDocument.single('file'),
+  rejectOversizedPortalImage,
   (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -144,7 +158,7 @@ router.post(
   '/member/upload',
   protect,
   authorize(ROLES.MATRIMONY),
-  upload.single('file'),
+  matrimonyPhotoUpload,
   (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -161,6 +175,7 @@ router.post(
   protect,
   authorize(ROLES.MATRIMONY),
   uploadDocument.single('file'),
+  rejectOversizedPortalImage,
   (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });

@@ -30,9 +30,17 @@ import {
 } from '../controllers/marketplaceCategoryController.js';
 import { protect, authorize } from '../middleware/auth.js';
 import { ROLES } from '../config/constants.js';
+import { uploadImage50kb, portalImageUploadError } from '../middleware/upload.js';
 
 const router = express.Router();
 const admins = [ROLES.SUPER_ADMIN, ROLES.EDITOR];
+
+const marketplaceImageUpload = (req, res, next) => {
+  uploadImage50kb.single('file')(req, res, (err) => {
+    if (err) return portalImageUploadError(err, req, res, next);
+    next();
+  });
+};
 
 // Public
 router.get('/products', getPublicProducts);
@@ -46,6 +54,21 @@ router.post('/seller/register', registerSeller);
 
 // Seller
 router.get('/seller/stats', protect, authorize(ROLES.SELLER), getSellerDashboardStats);
+router.post(
+  '/seller/upload',
+  protect,
+  authorize(ROLES.SELLER),
+  marketplaceImageUpload,
+  (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+    res.json({
+      success: true,
+      data: { url: `/uploads/${req.file.filename}`, filename: req.file.filename },
+    });
+  }
+);
 router.get('/seller/products', protect, authorize(ROLES.SELLER), getMyProducts);
 router.post('/seller/products', protect, authorize(ROLES.SELLER), createProduct);
 router.put('/seller/products/:id', protect, authorize(ROLES.SELLER), updateMyProduct);

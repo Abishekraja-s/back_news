@@ -1,6 +1,6 @@
 /**
- * Replace picsum.photos article images with the site default OG JPEG.
- * WhatsApp crawlers get HTTP 405 from picsum and drop the link preview image.
+ * For WhatsApp/Facebook: set ogImage/twitterImage away from picsum (crawler 405).
+ * Does NOT change featuredImage (site listing cards keep unique photos).
  *
  * Usage: node scripts/fixPicsumOgImages.js
  */
@@ -20,32 +20,15 @@ async function main() {
   const col = mongoose.connection.collection('articles');
 
   const filter = {
-    $or: [
-      { featuredImage: /picsum\.photos/i },
-      { ogImage: /picsum\.photos/i },
-      { twitterImage: /picsum\.photos/i },
-    ],
+    $or: [{ ogImage: /picsum\.photos/i }, { twitterImage: /picsum\.photos/i }],
   };
 
   const before = await col.countDocuments(filter);
-  console.log('articles_with_picsum=', before);
+  console.log('articles_with_picsum_og=', before);
 
   const result = await col.updateMany(filter, [
     {
       $set: {
-        featuredImage: {
-          $cond: [
-            {
-              $regexMatch: {
-                input: { $ifNull: ['$featuredImage', ''] },
-                regex: 'picsum\\.photos',
-                options: 'i',
-              },
-            },
-            DEFAULT_OG,
-            '$featuredImage',
-          ],
-        },
         ogImage: {
           $cond: [
             {
@@ -77,13 +60,6 @@ async function main() {
   ]);
 
   console.log('matched=', result.matchedCount, 'modified=', result.modifiedCount);
-
-  const sample = await col.findOne(
-    { slug: 'article-5-5' },
-    { projection: { slug: 1, featuredImage: 1, ogImage: 1, title: 1 } }
-  );
-  console.log('sample=', JSON.stringify(sample));
-
   await mongoose.disconnect();
 }
 

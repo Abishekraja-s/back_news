@@ -1,6 +1,7 @@
 import Article from '../models/Article.js';
 import GoogleNewsItem from '../models/GoogleNewsItem.js';
 import { ARTICLE_STATUS } from '../config/constants.js';
+import { getArticlePublicUrl } from '../utils/articleUrls.js';
 
 const SITE_NAME = 'The Great India News';
 const FALLBACK_TITLE = 'The Great India News - தி கிரேட் இந்தியா நியூஸ்';
@@ -62,12 +63,21 @@ export const toAbsoluteImageUrl = (image, req, seed = 'news') => {
   return `${api}/${img}`;
 };
 
-const renderShareHtml = ({ title, description, image, pageUrl, siteName }) => {
+const BOT_RE =
+  /whatsapp|facebookexternalhit|Facebot|Twitterbot|TelegramBot|Slackbot|LinkedInBot|Discordbot|SkypeUriPreview|bot|crawler|spider|preview/i;
+
+const renderShareHtml = ({ title, description, image, pageUrl, siteName, shareUrl }, { redirect = true } = {}) => {
   const t = escapeHtml(title || FALLBACK_TITLE);
   const d = escapeHtml((description || FALLBACK_DESCRIPTION).slice(0, 200));
   const img = escapeHtml(image);
-  const url = escapeHtml(pageUrl);
+  const article = escapeHtml(pageUrl);
+  const ogUrl = escapeHtml(shareUrl || pageUrl);
   const site = escapeHtml(siteName || SITE_NAME);
+  const redirectBits = redirect
+    ? `
+  <meta http-equiv="refresh" content="1;url=${article}" />
+  <script>setTimeout(function(){location.replace(${JSON.stringify(pageUrl)});},800);</script>`
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="ta">
@@ -75,32 +85,31 @@ const renderShareHtml = ({ title, description, image, pageUrl, siteName }) => {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${t} | ${site}</title>
-  <link rel="canonical" href="${url}" />
+  <link rel="canonical" href="${article}" />
 
   <meta property="og:type" content="article" />
   <meta property="og:site_name" content="${site}" />
   <meta property="og:title" content="${t}" />
   <meta property="og:description" content="${d}" />
-  <meta property="og:url" content="${url}" />
+  <meta property="og:url" content="${ogUrl}" />
   <meta property="og:image" content="${img}" />
   <meta property="og:image:secure_url" content="${img}" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="${t}" />
+  <meta property="og:locale" content="ta_IN" />
 
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${t}" />
   <meta name="twitter:description" content="${d}" />
   <meta name="twitter:image" content="${img}" />
-
-  <meta http-equiv="refresh" content="0;url=${url}" />
+${redirectBits}
 </head>
 <body>
   <h1>${t}</h1>
   <p>${d}</p>
   <img src="${img}" alt="${t}" width="1200" height="630" />
-  <p><a href="${url}">Continue to article →</a></p>
-  <script>location.replace(${JSON.stringify(pageUrl)});</script>
+  <p><a href="${article}">Continue to article →</a></p>
 </body>
 </html>`;
 };
@@ -111,8 +120,9 @@ const resolveShareMeta = async (slug, req) => {
     status: ARTICLE_STATUS.PUBLISHED,
   })
     .select(
-      'title excerpt content featuredImage ogImage ogTitle ogDescription metaDescription slug canonicalUrl'
+      'title excerpt content featuredImage ogImage ogTitle ogDescription metaDescription slug canonicalUrl category'
     )
+    .populate({ path: 'category', select: 'slug' })
     .lean();
 
   if (article) {
@@ -124,7 +134,7 @@ const resolveShareMeta = async (slug, req) => {
       stripHtml(article.content).slice(0, 180) ||
       FALLBACK_DESCRIPTION;
     // Always use our site article URL for social previews (not external source canonical)
-    const pageUrl = `${getSiteUrl()}/news/${article.slug}`;
+    const pageUrl = getArticlePublicUrl(article, getSiteUrl());
     return {
       title,
       description,
@@ -164,18 +174,28 @@ export const shareNewsArticle = async (req, res, next) => {
         .send('<!DOCTYPE html><title>Not found</title><h1>Article not found</h1>');
     }
 
+    const ua = req.get('user-agent') || '';
+    const isBot = BOT_RE.test(ua);
+    const site = getSiteUrl();
+    const shareUrl = `${site}/og/news/${encodeURIComponent(meta.slug)}`;
+
     res
       .status(200)
       .type('html')
-      .set('Cache-Control', 'public, max-age=300')
+      .set('Cache-Control', 'public, max-age=60, must-revalidate')
       .send(
-        renderShareHtml({
-          title: meta.title,
-          description: meta.description,
-          image: meta.image,
-          pageUrl: meta.url,
-          siteName: SITE_NAME,
-        })
+        renderShareHtml(
+          {
+            title: meta.title,
+            description: meta.description,
+            image: meta.image,
+            pageUrl: meta.url,
+            shareUrl,
+            siteName: SITE_NAME,
+          },
+          // Instant redirect breaks WhatsApp — never redirect crawlers
+          { redirect: !isBot }
+        )
       );
   } catch (error) {
     next(error);

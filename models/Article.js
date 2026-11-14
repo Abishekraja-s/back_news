@@ -59,6 +59,10 @@ const articleSchema = new mongoose.Schema(
     isMustWatch: { type: Boolean, default: false },
     audioReader: { type: String, default: '' },
     youtubeVideoLink: { type: String, default: '' },
+    socialX: { type: String, default: '' },
+    socialInstagram: { type: String, default: '' },
+    socialFacebook: { type: String, default: '' },
+    socialTiktok: { type: String, default: '' },
     liveUpdates: [liveUpdateSchema],
     /** External import metadata (RSS, etc.) */
     sourceUrl: { type: String, default: '' },

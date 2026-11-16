@@ -54,6 +54,24 @@ export const createAd = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'HTML code is required for code ads' });
     }
 
+    const startDate = req.body.startDate ? new Date(req.body.startDate) : new Date();
+    const endDate =
+      req.body.endDate === null || req.body.endDate === ''
+        ? null
+        : req.body.endDate
+          ? new Date(req.body.endDate)
+          : undefined;
+
+    if (Number.isNaN(startDate.getTime())) {
+      return res.status(400).json({ success: false, message: 'Invalid from date' });
+    }
+    if (endDate && Number.isNaN(endDate.getTime())) {
+      return res.status(400).json({ success: false, message: 'Invalid to date' });
+    }
+    if (endDate && endDate < startDate) {
+      return res.status(400).json({ success: false, message: 'To date must be on or after from date' });
+    }
+
     const ad = await Advertisement.create({
       title: title.trim(),
       position,
@@ -63,8 +81,8 @@ export const createAd = async (req, res, next) => {
       code: type === 'code' ? code : '',
       isActive: isActive !== false,
       priority: Number(priority) || 0,
-      startDate: req.body.startDate || new Date(),
-      endDate: req.body.endDate || undefined,
+      startDate,
+      endDate: endDate === undefined ? undefined : endDate,
     });
     res.status(201).json({ success: true, data: ad, message: 'Advertisement created' });
   } catch (error) {
@@ -78,6 +96,29 @@ export const updateAd = async (req, res, next) => {
     const updates = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+
+    if (updates.startDate !== undefined) {
+      if (updates.startDate === null || updates.startDate === '') {
+        return res.status(400).json({ success: false, message: 'From date is required' });
+      }
+      updates.startDate = new Date(updates.startDate);
+      if (Number.isNaN(updates.startDate.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid from date' });
+      }
+    }
+    if (updates.endDate !== undefined) {
+      if (updates.endDate === null || updates.endDate === '') {
+        updates.endDate = null;
+      } else {
+        updates.endDate = new Date(updates.endDate);
+        if (Number.isNaN(updates.endDate.getTime())) {
+          return res.status(400).json({ success: false, message: 'Invalid to date' });
+        }
+      }
+    }
+    if (updates.startDate && updates.endDate && updates.endDate < updates.startDate) {
+      return res.status(400).json({ success: false, message: 'To date must be on or after from date' });
     }
 
     if (updates.type === 'image' && !updates.image && req.body.image === '') {

@@ -59,6 +59,7 @@ const articleSchema = new mongoose.Schema(
     isMustWatch: { type: Boolean, default: false },
     audioReader: { type: String, default: '' },
     youtubeVideoLink: { type: String, default: '' },
+    socialYoutube: { type: String, default: '' },
     socialX: { type: String, default: '' },
     socialInstagram: { type: String, default: '' },
     socialFacebook: { type: String, default: '' },
@@ -66,8 +67,8 @@ const articleSchema = new mongoose.Schema(
     liveUpdates: [liveUpdateSchema],
     /** External import metadata (RSS, etc.) */
     sourceUrl: { type: String, default: '' },
-    importSource: { type: String, default: '', index: true },
-    importGuid: { type: String, default: '', index: true },
+    importSource: { type: String, default: '' },
+    importGuid: { type: String, default: '' },
     rssFeed: { type: mongoose.Schema.Types.ObjectId, ref: 'RssFeedSource' },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },

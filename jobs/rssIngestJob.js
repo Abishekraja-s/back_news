@@ -1,10 +1,28 @@
 import RssFeedSource from '../models/RssFeedSource.js';
+import Article from '../models/Article.js';
+import { ARTICLE_STATUS } from '../config/constants.js';
 import { runAllRssIngest } from '../services/rssIngestService.js';
 
 let intervalHandle = null;
 let bootTimer = null;
 
 const MIN_MS = 60 * 1000;
+/** Keep RSS drafts only this many days to avoid Atlas free-tier quota fills */
+const RSS_DRAFT_RETENTION_DAYS = Number(process.env.RSS_DRAFT_RETENTION_DAYS || 7);
+
+const pruneOldRssDrafts = async () => {
+  const cutoff = new Date(Date.now() - RSS_DRAFT_RETENTION_DAYS * 864e5);
+  const result = await Article.deleteMany({
+    importSource: 'rss',
+    status: { $in: [ARTICLE_STATUS.DRAFT, ARTICLE_STATUS.TRASH] },
+    createdAt: { $lt: cutoff },
+  });
+  if (result.deletedCount) {
+    console.log(
+      `[RssIngest] Pruned ${result.deletedCount} RSS draft/trash older than ${RSS_DRAFT_RETENTION_DAYS}d`
+    );
+  }
+};
 
 /**
  * Background RSS → Article ingest for sources with autoFetchEnabled.
@@ -12,6 +30,8 @@ const MIN_MS = 60 * 1000;
 export const startRssIngestJob = () => {
   const run = async (label) => {
     try {
+      await pruneOldRssDrafts();
+
       const autoSources = await RssFeedSource.countDocuments({
         enabled: true,
         autoFetchEnabled: true,

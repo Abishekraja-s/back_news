@@ -36,6 +36,26 @@ export const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
+/** Album gallery originals — compressed server-side to ~50–100 KB WebP */
+const albumFileFilter = (req, file, cb) => {
+  const allowedExt = /jpeg|jpg|png|webp/;
+  const ext = allowedExt.test(path.extname(file.originalname).toLowerCase());
+  const mimeOk = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(
+    String(file.mimetype || '').toLowerCase()
+  );
+  if (ext && mimeOk) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only JPG, JPEG, PNG and WebP images are allowed'), false);
+  }
+};
+
+export const uploadAlbumImages = multer({
+  storage,
+  fileFilter: albumFileFilter,
+  limits: { fileSize: 12 * 1024 * 1024, files: 40 },
+});
+
 /** Matrimony + Marketplace product photos — max 50 KB */
 export const MAX_PORTAL_IMAGE_BYTES = 50 * 1024;
 

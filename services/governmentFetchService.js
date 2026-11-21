@@ -3,7 +3,9 @@
  * Does not scrape protected/restricted pages.
  */
 
-import { isMostlyEnglish, matchesPreferredLanguage } from './governmentTextUtils.js';
+import { isMostlyEnglish, isTamilText, matchesPreferredLanguage } from './governmentTextUtils.js';
+
+const hasTamilChars = (s = '') => /[\u0B80-\u0BFF]/.test(String(s || ''));
 
 const decodeXml = (s = '') =>
   s
@@ -142,7 +144,13 @@ export const fetchJsonApi = async (url) => {
 const guessCategory = (text = '', hint = '', sourceCategory = 'general') => {
   const t = `${hint} ${text}`.toLowerCase();
   if (/tender|e-procure|bid/.test(t)) return 'tender';
-  if (/recruit|vacancy|job|employment|நிரப்பு/.test(t)) return 'job';
+  if (
+    /recruit|vacancy|job|employment|நிரப்பு|tnpsc|tnusrb|trb|mrb|hall.?ticket|group\s*[ivx0-9]|appointment|நிரப்புதல்|வேலைவாய்ப்பு/.test(
+      t
+    )
+  ) {
+    return 'job';
+  }
   if (/scheme|yojana|திட்ட/.test(t)) return 'scheme';
   if (/circular|சுற்றறிக்கை/.test(t)) return 'circular';
   if (/order|g\.?o\.?|அரசாணை/.test(t)) return 'order';
@@ -326,15 +334,54 @@ export const DEFAULT_SOURCES = [
     isActive: false,
   },
   {
-    name: 'Tamil Nadu Government — Information',
+    name: 'Tamil Nadu Government — Updates',
     level: 'tamil_nadu',
     department: 'Government of Tamil Nadu',
-    feedUrl: '',
+    /** Public Google News RSS (tn.gov.in has no official RSS). Admin can replace with an official feed URL. */
+    feedUrl:
+      'https://news.google.com/rss/search?q=%22Government%20of%20Tamil%20Nadu%22%20OR%20%22Tamil%20Nadu%20government%22%20(notification%20OR%20scheme%20OR%20order%20OR%20GO)&hl=en-IN&gl=IN&ceid=IN:en',
     websiteUrl: 'https://www.tn.gov.in',
     category: 'announcement',
-    language: 'both',
+    language: 'en',
     keywords: [],
-    isActive: false,
+    isActive: true,
+  },
+  {
+    name: 'TNPSC & Tamil Nadu Govt Jobs',
+    level: 'tamil_nadu',
+    department: 'TNPSC / Tamil Nadu Recruitments',
+    /** Public Google News RSS covering TNPSC/TRB/MRB/TNUSRB job notifications */
+    feedUrl:
+      'https://news.google.com/rss/search?q=TNPSC%20OR%20TNUSRB%20OR%20%22Tamil%20Nadu%22%20(TRB%20OR%20MRB)%20(notification%20OR%20recruitment%20OR%20vacancy%20OR%20job)&hl=en-IN&gl=IN&ceid=IN:en',
+    websiteUrl: 'https://www.tnpsc.gov.in',
+    category: 'job',
+    language: 'en',
+    keywords: [],
+    isActive: true,
+  },
+  {
+    name: 'தமிழ்நாடு அரசு — அறிவிப்புகள் (Tamil)',
+    level: 'tamil_nadu',
+    department: 'தமிழ்நாடு அரசு',
+    feedUrl:
+      'https://news.google.com/rss/search?q=%E0%AE%A4%E0%AE%AE%E0%AE%BF%E0%AE%B4%E0%AF%8D%E0%AE%A8%E0%AE%BE%E0%AE%9F%E0%AF%81%20%E0%AE%85%E0%AE%B0%E0%AE%9A%E0%AF%81%20OR%20TNPSC%20(%E0%AE%85%E0%AE%B1%E0%AE%BF%E0%AE%B5%E0%AE%BF%E0%AE%AA%E0%AF%8D%E0%AE%AA%E0%AF%81%20OR%20%E0%AE%A4%E0%AE%BF%E0%AE%9F%E0%AF%8D%E0%AE%9F%E0%AE%AE%E0%AF%8D%20OR%20%E0%AE%A8%E0%AE%BF%E0%AE%AF%E0%AE%AE%E0%AE%A9%E0%AE%AE%E0%AF%8D)&hl=ta&gl=IN&ceid=IN:ta',
+    websiteUrl: 'https://www.tn.gov.in',
+    category: 'announcement',
+    language: 'ta',
+    keywords: [],
+    isActive: true,
+  },
+  {
+    name: 'TNPSC நியமனங்கள் (Tamil)',
+    level: 'tamil_nadu',
+    department: 'TNPSC',
+    feedUrl:
+      'https://news.google.com/rss/search?q=TNPSC%20OR%20%E0%AE%A4%E0%AE%AE%E0%AE%BF%E0%AE%B4%E0%AF%8D%E0%AE%A8%E0%AE%BE%E0%AE%9F%E0%AF%81%20(%E0%AE%B5%E0%AF%87%E0%AE%B2%E0%AF%88%E0%AE%B5%E0%AE%BE%E0%AE%AF%E0%AF%8D%E0%AE%AA%E0%AF%8D%E0%AE%AA%E0%AF%81%20OR%20%E0%AE%A8%E0%AE%BF%E0%AE%AF%E0%AE%AE%E0%AE%A9%E0%AE%AE%E0%AF%8D%20OR%20recruitment%20OR%20notification)&hl=ta&gl=IN&ceid=IN:ta',
+    websiteUrl: 'https://www.tnpsc.gov.in',
+    category: 'job',
+    language: 'ta',
+    keywords: [],
+    isActive: true,
   },
 ];
 
@@ -388,23 +435,31 @@ export const fetchFromSource = async (source, globalKeywords = [], maxItems = 20
       );
     })
     .slice(0, maxItems)
-    .map((item) => ({
-      title: item.title,
-      titleTamil: item.titleTamil || '',
-      summary: item.summary || '',
-      summaryTamil: item.summaryTamil || '',
-      content: item.content || item.summary || '',
-      category: guessCategory(`${item.title} ${item.summary}`, item.categoryHint, source.category),
-      level: source.level || 'central',
-      department: source.department || source.name,
-      sourceName: source.name,
-      sourceUrl: source.websiteUrl || source.feedUrl || source.apiUrl || '',
-      officialUrl: item.officialUrl || '',
-      language: sourceLang === 'both' ? (isMostlyEnglish(item.title) ? 'en' : 'ta') : sourceLang,
-      publishedAt: item.publishedAt ? new Date(item.publishedAt) : new Date(),
-      keywords,
-      isImportant: item.categoryHint === 'alert' || /alert|emergency|urgent/i.test(item.title),
-    }));
+    .map((item) => {
+      const title = item.title || '';
+      const summary = item.summary || '';
+      const titleIsTamil = hasTamilChars(title) || isTamilText(title);
+      const summaryIsTamil = hasTamilChars(summary) || isTamilText(summary);
+      const detectedLang =
+        sourceLang === 'both' ? (isMostlyEnglish(title) ? 'en' : 'ta') : sourceLang;
+      return {
+        title,
+        titleTamil: item.titleTamil || (titleIsTamil ? title : ''),
+        summary,
+        summaryTamil: item.summaryTamil || (summaryIsTamil ? summary : ''),
+        content: item.content || summary || '',
+        category: guessCategory(`${title} ${summary}`, item.categoryHint, source.category),
+        level: source.level || 'central',
+        department: source.department || source.name,
+        sourceName: source.name,
+        sourceUrl: source.websiteUrl || source.feedUrl || source.apiUrl || '',
+        officialUrl: item.officialUrl || '',
+        language: titleIsTamil ? 'ta' : detectedLang,
+        publishedAt: item.publishedAt ? new Date(item.publishedAt) : new Date(),
+        keywords,
+        isImportant: item.categoryHint === 'alert' || /alert|emergency|urgent/i.test(title),
+      };
+    });
 
   return { items, source: source.name, skipped: false };
 };

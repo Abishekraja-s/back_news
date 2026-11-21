@@ -200,9 +200,40 @@ export const isLiveStatus = (status) => ['live', 'halftime'].includes(status);
 export const mapStatus = (s, detail = '') => {
   const raw = String(s || '').trim();
   const detailRaw = String(detail || '').trim();
-  const v = `${raw} ${detailRaw}`.toUpperCase().replace(/[\s-]+/g, '_');
+  const v = `${raw} ${detailRaw}`
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 
-  if (v.includes('HALF')) return 'halftime';
+  // Football half-time only — ignore cricket "Cut in half" / abnormal splits
+  if (
+    (v.includes('HALFTIME') ||
+      v.includes('HALF_TIME') ||
+      v === 'HT' ||
+      /(^|_)HALF($|_)/.test(v)) &&
+    !v.includes('CUT_IN_HALF') &&
+    !v.includes('CUT_IN')
+  ) {
+    return 'halftime';
+  }
+
+  // Cricket day-break / session pauses are still an in-progress match
+  const cricketBreakTokens = [
+    'STUMPS',
+    'END_OF_DAY',
+    'END_OF_INNINGS',
+    'LUNCH',
+    'TEA',
+    'DRINKS',
+    'DINNER',
+    'INNINGS_BREAK',
+    'DAY_1',
+    'DAY_2',
+    'DAY_3',
+    'DAY_4',
+    'DAY_5',
+  ];
+  if (cricketBreakTokens.some((t) => v.includes(t))) return 'live';
 
   const liveTokens = [
     'LIVE',
@@ -407,7 +438,15 @@ export const normalizeMatch = (sport, raw = {}, provider = 'custom') => {
     awayScoreText,
     status,
     statusDetail: String(
-      raw.statusDetail || raw.status_detail || raw.minute || raw.clock || raw.status_note || raw.note || ''
+      raw.statusDetail ||
+        raw.status_detail ||
+        raw.status_text ||
+        raw.statusText ||
+        raw.minute ||
+        raw.clock ||
+        raw.status_note ||
+        raw.note ||
+        ''
     ).trim(),
     liveClock: String(
       raw.liveClock || raw.live_clock || raw.clock || raw.elapsed || raw.minute || raw.overs || ''
@@ -417,10 +456,16 @@ export const normalizeMatch = (sport, raw = {}, provider = 'custom') => {
     logo,
     winner,
     stats: {
-      ...(raw.stats && typeof raw.stats === 'object' ? raw.stats : {}),
+      ...(raw.stats && typeof raw.stats === 'object' && !Array.isArray(raw.stats) ? raw.stats : {}),
       ...(seriesId ? { seriesId } : {}),
       ...(logo ? { logo } : {}),
       ...(winner ? { winner } : {}),
+      ...(raw.home_logo || homeObj?.logo
+        ? { homeLogo: String(raw.home_logo || homeObj?.logo || '').trim() }
+        : {}),
+      ...(raw.away_logo || awayObj?.logo
+        ? { awayLogo: String(raw.away_logo || awayObj?.logo || '').trim() }
+        : {}),
     },
     players: Array.isArray(raw.players) ? raw.players : [],
     sourceUrl: String(raw.url || raw.sourceUrl || raw.link || '').trim(),
@@ -661,6 +706,125 @@ const cachedGet = async (cacheKey, ttlMs, fetcher) => {
   return { ...value, fromCache: false };
 };
 
+const httpGetText = async (url, headers, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) => {
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      ...headers,
+      Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+    },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    const err = new Error(`API returned HTTP ${res.status}`);
+    err.statusCode = res.status;
+    throw err;
+  }
+  return res.text();
+};
+
+/** Full national-team style names (India internationals + peers) */
+const CRICKET_INTL_TEAM_RE =
+  /(^|-)(india|india-women|new-zealand|australia|england|pakistan|south-africa|sri-lanka|bangladesh|west-indies|afghanistan|ireland|scotland|zimbabwe|netherlands|namibia|usa|united-states|oman|nepal)(-|$)/i;
+
+const isIndiaInternationalSlug = (slug = '') => {
+  const s = String(slug).toLowerCase();
+  if (!s) return false;
+  // National India (men/women/A), not domestic "Mumbai Indians" / state sides
+  if (/(^|-)mumbai-indians(-|$)/.test(s)) return false;
+  return /(^|-)india(-women|-a)?(-vs-|-)|-vs-india(-women|-a)?(-|$)/.test(s);
+};
+
+const cricketSlugPriority = (slug = '') => {
+  const s = String(slug).toLowerCase();
+  if (isIndiaInternationalSlug(s)) return 0;
+  if (CRICKET_INTL_TEAM_RE.test(s)) return 1;
+  return 2;
+};
+
+/**
+ * SportScore widget /matches/ omits many internationals (e.g. NZ vs India Test).
+ * Discover match slugs from the public cricket HTML index, then hydrate via detail API.
+ */
+const discoverSportScoreCricketSlugs = async (base, headers) => {
+  const cacheKey = `sportscore:cricket:html-slugs`;
+  const cached = getCache(cacheKey);
+  if (cached?.slugs?.length) return cached.slugs;
+
+  try {
+    const html = await httpGetText(`${base}/cricket/`, headers, { timeoutMs: 12000 });
+    const slugs = [
+      ...new Set(
+        [...String(html).matchAll(/\/cricket\/match\/([a-z0-9-]+)\//gi)].map((m) => m[1].toLowerCase())
+      ),
+    ];
+    setCache(cacheKey, { slugs }, 2 * 60 * 1000);
+    return slugs;
+  } catch {
+    return [];
+  }
+};
+
+const fetchSportScoreMatchBySlug = async (base, sportParam, slug, headers) => {
+  const url = `${base}/api/widget/match/?sport=${encodeURIComponent(sportParam)}&slug=${encodeURIComponent(slug)}`;
+  const { json } = await httpGetJson(url, headers, { timeoutMs: 10000, retries: 1 });
+  const match = json?.match || null;
+  if (!match || typeof match !== 'object') return null;
+  if (!match.url) match.url = `/cricket/match/${slug}/`;
+  return match;
+};
+
+/** Parallel detail hydration for slugs missing from the widget list */
+const hydrateSportScoreCricketFromSlugs = async (base, sportParam, slugs, headers, existingKeys, options = {}) => {
+  const maxHydrate = Number(options.maxHydrate) || (options.bypassCache ? 50 : 40);
+  const concurrency = 6;
+  const missing = slugs
+    .filter((slug) => {
+      const key = `/cricket/match/${slug}/`;
+      return !existingKeys.has(key) && !existingKeys.has(slug);
+    })
+    .sort((a, b) => cricketSlugPriority(a) - cricketSlugPriority(b))
+    .slice(0, maxHydrate);
+
+  const out = [];
+  for (let i = 0; i < missing.length; i += concurrency) {
+    const chunk = missing.slice(i, i + concurrency);
+    const results = await Promise.allSettled(
+      chunk.map((slug) => fetchSportScoreMatchBySlug(base, sportParam, slug, headers))
+    );
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) out.push(r.value);
+    }
+  }
+  return out;
+};
+
+/** Prefer India internationals, then other internationals, then domestic */
+const sortCricketMatchesIndiaFirst = (matches = []) =>
+  [...matches].sort((a, b) => {
+    const slugA = String(a.sourceUrl || a.url || a.externalId || '').toLowerCase();
+    const slugB = String(b.sourceUrl || b.url || b.externalId || '').toLowerCase();
+    const teamScore = (m, slug) => {
+      const home = String(m.homeTeam || '').toLowerCase();
+      const away = String(m.awayTeam || '').toLowerCase();
+      const indiaTeam =
+        /^(india|india women|india a)$/.test(home) || /^(india|india women|india a)$/.test(away);
+      if (indiaTeam || isIndiaInternationalSlug(slug)) return 0;
+      const intl =
+        /test|odi|t20|world cup|asia cup|champions trophy|bilateral/i.test(
+          String(m.competition || m.league || m.tournament || '')
+        ) || cricketSlugPriority(slug) === 1;
+      if (intl) return 1;
+      return 2;
+    };
+    const d = teamScore(a, slugA) - teamScore(b, slugB);
+    if (d !== 0) return d;
+    const liveA = isLiveStatus(a.status) ? 0 : a.status === 'scheduled' ? 1 : 2;
+    const liveB = isLiveStatus(b.status) ? 0 : b.status === 'scheduled' ? 1 : 2;
+    return liveA - liveB;
+  });
+
 /** CricLive — live scores only on refresh; other endpoints use slower cache when requested */
 const fetchCricLive = async (sport, modeConfig) => {
   if (sport !== 'cricket') {
@@ -834,12 +998,76 @@ const fetchSportScore = async (sport, modeConfig, options = {}) => {
     if (added === 0 || batch.length < pageSize) break;
   }
 
-  const normalized = dedupeMatches(
+  // Cricket: widget list is domestic-heavy and often omits India Test/ODI/T20I.
+  // Hydrate missing fixtures from the public cricket index + per-match detail API.
+  let hydratedCount = 0;
+  if (sport === 'cricket' && allFixtures) {
+    const existingKeys = new Set(
+      collected.map((raw) =>
+        String(raw.url || raw.id || `${raw.home}|${raw.away}|${raw.time}`).toLowerCase()
+      )
+    );
+    for (const raw of collected) {
+      const slug = String(raw.url || '')
+        .replace(/\/$/, '')
+        .split('/')
+        .filter(Boolean)
+        .pop();
+      if (slug) existingKeys.add(slug.toLowerCase());
+    }
+
+    const htmlSlugs = await discoverSportScoreCricketSlugs(base, headers);
+    // Always try known high-priority India / bilateral patterns even if HTML cache is thin
+    const priorityGuesses = [
+      'new-zealand-vs-india',
+      'india-vs-new-zealand',
+      'australia-vs-india',
+      'india-vs-australia',
+      'england-vs-india',
+      'india-vs-england',
+      'india-vs-south-africa',
+      'south-africa-vs-india',
+      'india-vs-pakistan',
+      'pakistan-vs-india',
+      'india-vs-sri-lanka',
+      'sri-lanka-vs-india',
+      'india-vs-bangladesh',
+      'bangladesh-vs-india',
+      'india-vs-west-indies',
+      'west-indies-vs-india',
+      'india-vs-afghanistan',
+      'afghanistan-vs-india',
+      'india-women-vs-australia-women',
+      'australia-women-vs-india-women',
+    ];
+    const slugPool = [...new Set([...htmlSlugs, ...priorityGuesses])];
+    const extras = await hydrateSportScoreCricketFromSlugs(
+      base,
+      sportParam,
+      slugPool,
+      headers,
+      existingKeys,
+      options
+    );
+    for (const raw of extras) {
+      const key = String(raw.url || raw.id || `${raw.home}|${raw.away}|${raw.time}`).toLowerCase();
+      if (existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      collected.push(raw);
+      hydratedCount += 1;
+    }
+  }
+
+  let normalized = dedupeMatches(
     collected
       .map((m) => normalizeMatch(sport, m, 'sportscore'))
       .map(ensureMatchCategory)
       .filter(allFixtures ? validateMatchRecord : validateLiveMatch)
   );
+
+  if (sport === 'cricket') {
+    normalized = sortCricketMatchesIndiaFirst(normalized);
+  }
 
   const catalog = extractCatalogFromMatches(normalized);
 
@@ -851,6 +1079,7 @@ const fetchSportScore = async (sport, modeConfig, options = {}) => {
     httpStatus: lastHttp,
     fromCache,
     catalog,
+    meta: sport === 'cricket' ? { hydratedFromDetail: hydratedCount } : undefined,
   };
 };
 
@@ -1109,7 +1338,12 @@ export const fetchFromExternalApi = async (sport, modeConfig, { bypassCache = fa
   if (bypassCache) {
     // Bust live cache keys for this sport/provider on Fetch Now
     for (const key of responseCache.keys()) {
-      if (key.includes(`:${sport}`) || key.startsWith(`${provider}:live:`)) {
+      if (
+        key.includes(`:${sport}`) ||
+        key.startsWith(`${provider}:live:`) ||
+        key.startsWith('sportscore:cricket:html-slugs') ||
+        key.startsWith('sportscore:all:')
+      ) {
         responseCache.delete(key);
       }
     }

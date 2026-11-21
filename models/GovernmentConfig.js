@@ -53,7 +53,9 @@ const governmentConfigSchema = new mongoose.Schema(
     alertsWidgetTitleTa: { type: String, default: 'முக்கிய அரசு எச்சரிக்கைகள்' },
     showOnHomepage: { type: Boolean, default: true },
     /** Website content language: en = English only, ta = Tamil, both = no filter */
-    preferredLanguage: { type: String, enum: GOV_LANGUAGES, default: 'en' },
+    preferredLanguage: { type: String, enum: GOV_LANGUAGES, default: 'both' },
+    /** One-time flag: upgraded legacy en → both for Tamil homepage content */
+    languageMigratedToBoth: { type: Boolean, default: false },
     lastFetchAt: { type: Date },
     lastFetchStatus: { type: String, default: '' },
     lastFetchError: { type: String, default: '' },

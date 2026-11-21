@@ -33,6 +33,10 @@ const governmentNotificationSchema = new mongoose.Schema(
 
 governmentNotificationSchema.index({ status: 1, publishedAt: -1 });
 governmentNotificationSchema.index({ isImportant: 1, status: 1, publishedAt: -1 });
-governmentNotificationSchema.index({ title: 'text', summary: 'text', department: 'text' });
+// language_override must NOT be the document `language` field — MongoDB rejects `ta` / `both`
+governmentNotificationSchema.index(
+  { title: 'text', summary: 'text', department: 'text' },
+  { default_language: 'none', language_override: 'searchLanguage' }
+);
 
 export default mongoose.model('GovernmentNotification', governmentNotificationSchema);

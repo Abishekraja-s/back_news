@@ -1,15 +1,44 @@
+import mongoose from 'mongoose';
 import Article from '../models/Article.js';
 import { sanitizeContent } from '../utils/sanitize.js';
 import { generateSlug, paginate } from '../utils/helpers.js';
 import { ARTICLE_STATUS } from '../config/constants.js';
 import { invalidateRssCache } from '../services/rssFeedService.js';
 
+const MUST_READ_POPULATE = {
+  path: 'mustReadArticles',
+  select: 'title slug featuredImage imageAlt excerpt publishedAt status category',
+  populate: { path: 'category', select: 'name nameTamil slug' },
+};
+
 const populateFields = [
   { path: 'category', select: 'name nameTamil slug' },
   { path: 'subCategory', select: 'name nameTamil slug' },
   { path: 'district', select: 'name nameTamil slug' },
   { path: 'author', select: 'name slug profileImage designation' },
+  MUST_READ_POPULATE,
 ];
+
+const MAX_MUST_READ = 10;
+
+/** Normalize editor-picked Must Read article IDs (unique, valid, exclude self, capped). */
+const sanitizeMustReadArticles = (raw, excludeId = null) => {
+  if (raw == null) return undefined;
+  if (!Array.isArray(raw)) return [];
+  const exclude = excludeId ? String(excludeId) : null;
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const id = String(item?._id || item || '').trim();
+    if (!mongoose.Types.ObjectId.isValid(id)) continue;
+    if (exclude && id === exclude) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    if (out.length >= MAX_MUST_READ) break;
+  }
+  return out;
+};
 
 /** Build published filter with current time (do not cache Date at startup). */
 const getPublishedQuery = () => ({
@@ -51,10 +80,15 @@ export const getArticles = async (req, res, next) => {
       Object.assign(query, getPublishedQuery());
     }
 
+    const sort =
+      query.status === ARTICLE_STATUS.PUBLISHED
+        ? { publishedAt: -1, createdAt: -1 }
+        : { createdAt: -1 };
+
     const [articles, total] = await Promise.all([
       Article.find(query)
         .populate(populateFields)
-        .sort({ createdAt: -1 })
+        .sort(sort)
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -85,7 +119,15 @@ export const getArticleBySlug = async (req, res, next) => {
     article.views += 1;
     await article.save({ validateBeforeSave: false });
 
-    res.json({ success: true, data: article });
+    const data = article.toObject();
+    // Public response only — do not persist this filter (would wipe draft links)
+    if (Array.isArray(data.mustReadArticles)) {
+      data.mustReadArticles = data.mustReadArticles.filter(
+        (a) => a && a.status === ARTICLE_STATUS.PUBLISHED
+      );
+    }
+
+    res.json({ success: true, data });
   } catch (error) {
     next(error);
   }
@@ -105,16 +147,47 @@ export const getArticleById = async (req, res, next) => {
 
 export const getLatest = async (req, res, next) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 10, 30);
-    const articles = await Article.find(getPublishedQuery())
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 30);
+    /** published (default) = real latest news; updated = recently touched, but not ancient seeds */
+    const by = String(req.query.by || 'published').toLowerCase() === 'updated' ? 'updated' : 'published';
+    const daysRaw = parseInt(req.query.days, 10);
+    const days = Number.isFinite(daysRaw) ? Math.min(Math.max(daysRaw, 0), 90) : by === 'updated' ? 7 : 0;
+
+    const query = { ...getPublishedQuery() };
+    const now = new Date();
+
+    if (by === 'updated') {
+      const updatedSince = new Date(now.getTime() - (days || 7) * 24 * 60 * 60 * 1000);
+      // Ignore seed/old posts that only got an updatedAt bump
+      const publishedSince = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      query.updatedAt = { $gte: updatedSince };
+      query.publishedAt = { $gte: publishedSince, $lte: now };
+    } else if (days > 0) {
+      const publishedSince = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+      query.publishedAt = { $gte: publishedSince, $lte: now };
+    }
+
+    const sort =
+      by === 'updated' ? { updatedAt: -1, publishedAt: -1 } : { publishedAt: -1, updatedAt: -1 };
+
+    let articles = await Article.find(query)
       .populate(populateFields)
-      // Most recently updated first, then newest published
-      .sort({ updatedAt: -1, publishedAt: -1 })
+      .sort(sort)
       .limit(limit)
       .select('title slug excerpt featuredImage imageAlt category author publishedAt updatedAt')
       .lean();
 
-    res.json({ success: true, data: articles });
+    // Fallback: if "updated" window is empty, return newest published
+    if (!articles.length && by === 'updated') {
+      articles = await Article.find(getPublishedQuery())
+        .populate(populateFields)
+        .sort({ publishedAt: -1, updatedAt: -1 })
+        .limit(limit)
+        .select('title slug excerpt featuredImage imageAlt category author publishedAt updatedAt')
+        .lean();
+    }
+
+    res.json({ success: true, data: articles, meta: { by, days } });
   } catch (error) {
     next(error);
   }
@@ -151,21 +224,38 @@ export const getMustWatch = async (req, res, next) => {
 
 export const getPopular = async (req, res, next) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 10, 30);
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 30);
+    /** Default: last 7 days only (ignore older high-view articles) */
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 30);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const now = new Date();
 
     const articles = await Article.find({
       status: ARTICLE_STATUS.PUBLISHED,
-      publishedAt: { $gte: sevenDaysAgo, $lte: now },
+      $and: [
+        {
+          $or: [
+            { publishedAt: { $gte: since, $lte: now } },
+            // Fallback when publishedAt missing — still must be recent
+            {
+              $and: [
+                {
+                  $or: [{ publishedAt: null }, { publishedAt: { $exists: false } }],
+                },
+                { createdAt: { $gte: since, $lte: now } },
+              ],
+            },
+          ],
+        },
+      ],
     })
       .populate(populateFields)
-      .sort({ views: -1 })
+      .sort({ views: -1, publishedAt: -1 })
       .limit(limit)
-      .select('title slug excerpt featuredImage category author publishedAt views')
+      .select('title slug excerpt featuredImage category author publishedAt views createdAt')
       .lean();
 
-    res.json({ success: true, data: articles });
+    res.json({ success: true, data: articles, meta: { days, since } });
   } catch (error) {
     next(error);
   }
@@ -288,6 +378,9 @@ export const createArticle = async (req, res, next) => {
     const data = applyPublishTimestamp({ ...req.body, createdBy: req.user._id });
     data.content = sanitizeContent(data.content);
     data.slug = data.slug || (await generateSlug(data.title));
+    if (Object.prototype.hasOwnProperty.call(req.body, 'mustReadArticles')) {
+      data.mustReadArticles = sanitizeMustReadArticles(req.body.mustReadArticles);
+    }
 
     if (data.status === ARTICLE_STATUS.PUBLISHED && !data.publishedAt) {
       data.publishedAt = new Date();
@@ -316,6 +409,9 @@ export const updateArticle = async (req, res, next) => {
     const data = applyPublishTimestamp({ ...req.body }, article);
     if (data.content) data.content = sanitizeContent(data.content);
     if (data.title && !data.slug) data.slug = await generateSlug(data.title, req.params.id);
+    if (Object.prototype.hasOwnProperty.call(req.body, 'mustReadArticles')) {
+      data.mustReadArticles = sanitizeMustReadArticles(req.body.mustReadArticles, req.params.id);
+    }
 
     if (data.status === ARTICLE_STATUS.PUBLISHED && !data.publishedAt && !article.publishedAt) {
       data.publishedAt = new Date();

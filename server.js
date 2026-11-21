@@ -47,6 +47,7 @@ import astrologyRoutes from './routes/astrologyRoutes.js';
 import { startAstrologySyncJob } from './jobs/astrologySyncJob.js';
 import examQuizRoutes from './routes/examQuizRoutes.js';
 import eventGifRoutes from './routes/eventGifRoutes.js';
+import albumRoutes from './routes/albumRoutes.js';
 import databaseBackupRoutes from './routes/databaseBackupRoutes.js';
 
 dotenv.config();
@@ -164,6 +165,7 @@ app.use('/api/matrimony', matrimonyRoutes);
 app.use('/api/astrology', astrologyRoutes);
 app.use('/api/exams', examQuizRoutes);
 app.use('/api/event-gifs', eventGifRoutes);
+app.use('/api/albums', albumRoutes);
 app.use('/api/database-backup', databaseBackupRoutes);
 app.use('/api/pages', pageContentRoutes);
 app.use('/share', shareRoutes);

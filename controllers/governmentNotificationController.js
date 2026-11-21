@@ -12,6 +12,7 @@ import {
   normalizeKnownFeedUrl,
 } from '../services/governmentFetchService.js';
 import { isMostlyEnglish } from '../services/governmentTextUtils.js';
+import { hasTamil, translateNewsToTamil } from '../services/rssTranslateService.js';
 
 /** Filter notification rows for public display (Mongo Atlas cannot use \\u in regex) */
 const filterByPreferredLanguage = (items, preferred = 'en') => {
@@ -56,7 +57,8 @@ export const getOrCreateGovConfig = async () => {
       showLatestWidget: true,
       showAlertsWidget: true,
       showOnHomepage: true,
-      preferredLanguage: 'en',
+      preferredLanguage: 'both',
+      languageMigratedToBoth: true,
     });
     return config;
   }
@@ -64,7 +66,15 @@ export const getOrCreateGovConfig = async () => {
   let changed = false;
 
   if (!config.preferredLanguage) {
-    config.preferredLanguage = 'en';
+    config.preferredLanguage = 'both';
+    changed = true;
+  }
+  // One-time: legacy English-only configs blocked Tamil titles on public pages
+  if (!config.languageMigratedToBoth) {
+    if (config.preferredLanguage === 'en') {
+      config.preferredLanguage = 'both';
+    }
+    config.languageMigratedToBoth = true;
     changed = true;
   }
 
@@ -106,6 +116,66 @@ export const getOrCreateGovConfig = async () => {
         changed = true;
       }
     }
+
+    // Tamil Nadu: old template had empty feedUrl + isActive:false → nothing ever appeared
+    const tnDefaults = DEFAULT_SOURCES.filter((s) => s.level === 'tamil_nadu');
+    const tnGovDefault = tnDefaults.find((s) => /government/i.test(s.name)) || tnDefaults[0];
+    const tnJobDefault = tnDefaults.find((s) => /job|tnpsc/i.test(s.name)) || tnDefaults[1];
+
+    config.sources.forEach((s) => {
+      if (s.level !== 'tamil_nadu') return;
+      const isLegacyEmpty =
+        !String(s.feedUrl || '').trim() &&
+        /tamil\s*nadu\s*government/i.test(s.name || '');
+      if (isLegacyEmpty && tnGovDefault?.feedUrl) {
+        s.name = tnGovDefault.name;
+        s.feedUrl = tnGovDefault.feedUrl;
+        s.websiteUrl = s.websiteUrl || tnGovDefault.websiteUrl;
+        s.category = tnGovDefault.category || s.category || 'announcement';
+        s.language = tnGovDefault.language || 'en';
+        s.isActive = true;
+        changed = true;
+      }
+    });
+
+    const hasActiveTn = config.sources.some(
+      (s) => s.level === 'tamil_nadu' && s.isActive !== false && String(s.feedUrl || s.apiUrl || '').trim()
+    );
+    if (!hasActiveTn && tnGovDefault) {
+      config.sources.push({ ...tnGovDefault });
+      changed = true;
+    }
+
+    const hasTnJobs = config.sources.some(
+      (s) =>
+        s.level === 'tamil_nadu' &&
+        s.isActive !== false &&
+        String(s.feedUrl || '').trim() &&
+        (/job|tnpsc|recruit/i.test(s.name || '') || s.category === 'job')
+    );
+    if (!hasTnJobs && tnJobDefault) {
+      config.sources.push({ ...tnJobDefault });
+      changed = true;
+    }
+
+    // Ensure Tamil-language TN feeds exist (hl=ta)
+    const tnTamilDefaults = DEFAULT_SOURCES.filter(
+      (s) => s.level === 'tamil_nadu' && s.language === 'ta'
+    );
+    for (const def of tnTamilDefaults) {
+      const exists = config.sources.some(
+        (s) =>
+          s.level === 'tamil_nadu' &&
+          (s.name === def.name ||
+            (String(s.feedUrl || '').includes('hl=ta') &&
+              s.category === def.category &&
+              /tamil|தமிழ்|tnpsc|நியமன/i.test(s.name || '')))
+      );
+      if (!exists) {
+        config.sources.push({ ...def });
+        changed = true;
+      }
+    }
   }
 
   if (changed) {
@@ -113,6 +183,7 @@ export const getOrCreateGovConfig = async () => {
     await config.save();
   }
 
+  // Only strip non-English when admin explicitly chooses English-only
   if (config.preferredLanguage === 'en') {
     await disableNonEnglishNotifications('en');
   }
@@ -131,25 +202,85 @@ const parseList = (value) => {
   return [];
 };
 
-const importItems = async (items, autoPublish, sourceId, preferredLanguage = 'en') => {
+const importItems = async (items, autoPublish, sourceId, preferredLanguage = 'both') => {
   let created = 0;
   let skipped = 0;
+  /** Cap en→ta API calls per source batch (native Tamil RSS is preferred; free MT is flaky) */
+  let translateBudget = preferredLanguage === 'en' ? 0 : 5;
 
   for (const item of items) {
     if (preferredLanguage === 'en' && !isMostlyEnglish(`${item.title} ${item.summary}`)) {
       skipped += 1;
       continue;
     }
+    if (preferredLanguage === 'ta' && isMostlyEnglish(`${item.title} ${item.summary}`) && !hasTamil(item.titleTamil || '')) {
+      // Keep English-only rows out of Tamil-only mode unless we can translate below
+    }
+
     const fingerprint = buildFingerprint(item);
     const existing = await GovernmentNotification.findOne({ fingerprint });
     if (existing) {
       existing.lastUpdatedAt = new Date();
       if (item.summary && !existing.summary) existing.summary = item.summary;
+      // Prefer native Tamil from feeds; do not call translators on every duplicate (slow / flaky)
+      if (item.titleTamil && hasTamil(item.titleTamil) && !hasTamil(existing.titleTamil)) {
+        existing.titleTamil = item.titleTamil;
+      }
+      if (item.summaryTamil && hasTamil(item.summaryTamil) && !hasTamil(existing.summaryTamil)) {
+        existing.summaryTamil = item.summaryTamil;
+      }
+      if (hasTamil(item.title) && !hasTamil(existing.titleTamil)) {
+        existing.titleTamil = item.title;
+      }
       if (autoPublish && ['pending', 'approved'].includes(existing.status)) {
         existing.status = 'published';
         existing.reviewedAt = new Date();
       }
+      if (
+        preferredLanguage !== 'en' &&
+        existing.status === 'disabled' &&
+        (hasTamil(existing.titleTamil) || hasTamil(existing.title))
+      ) {
+        existing.status = autoPublish ? 'published' : 'pending';
+        existing.isActive = true;
+      }
       await existing.save();
+      skipped += 1;
+      continue;
+    }
+
+    let titleTamil = item.titleTamil || '';
+    let summaryTamil = item.summaryTamil || '';
+    if (!hasTamil(titleTamil) && hasTamil(item.title)) titleTamil = item.title;
+    if (!hasTamil(summaryTamil) && hasTamil(item.summary)) summaryTamil = item.summary;
+
+    // Optional en→ta only for NEW Tamil Nadu rows (budget-capped; free translators often fail)
+    if (
+      item.level === 'tamil_nadu' &&
+      translateBudget > 0 &&
+      !hasTamil(titleTamil) &&
+      isMostlyEnglish(item.title || '') &&
+      preferredLanguage !== 'en'
+    ) {
+      try {
+        const tr = await translateNewsToTamil({
+          title: item.title,
+          excerpt: item.summary || '',
+          content: '',
+        });
+        if (tr?.title && hasTamil(tr.title)) {
+          titleTamil = tr.title;
+          if (tr.excerpt && hasTamil(tr.excerpt)) summaryTamil = tr.excerpt;
+          translateBudget -= 1;
+        } else {
+          translateBudget -= 1; // spent attempt
+        }
+      } catch {
+        translateBudget -= 1;
+      }
+    }
+
+    if (preferredLanguage === 'ta' && !hasTamil(titleTamil) && isMostlyEnglish(item.title || '')) {
       skipped += 1;
       continue;
     }
@@ -158,9 +289,9 @@ const importItems = async (items, autoPublish, sourceId, preferredLanguage = 'en
       await GovernmentNotification.create({
         fingerprint,
         title: item.title,
-        titleTamil: item.titleTamil || '',
+        titleTamil,
         summary: item.summary || '',
-        summaryTamil: item.summaryTamil || '',
+        summaryTamil,
         content: item.content || '',
         category: item.category || 'general',
         level: item.level || 'central',
@@ -168,7 +299,7 @@ const importItems = async (items, autoPublish, sourceId, preferredLanguage = 'en
         sourceName: item.sourceName || '',
         sourceUrl: item.sourceUrl || '',
         officialUrl: item.officialUrl || '',
-        language: item.language || 'en',
+        language: hasTamil(titleTamil) || hasTamil(item.title) ? 'ta' : item.language || 'en',
         publishedAt: item.publishedAt || new Date(),
         status: autoPublish ? 'published' : 'pending',
         isImportant: Boolean(item.isImportant) || item.category === 'alert',
@@ -636,7 +767,7 @@ export const getHub = async (req, res, next) => {
     const rawItems = await GovernmentNotification.find(filter)
       .sort({ publishedAt: -1, fetchedAt: -1 })
       .limit(limit * 4)
-      .select('title titleTamil summary category level department publishedAt officialUrl sourceName isImportant')
+      .select('title titleTamil summary summaryTamil category level department publishedAt officialUrl sourceName isImportant')
       .lean();
 
     const items = filterByPreferredLanguage(rawItems, preferred).slice(0, limit);

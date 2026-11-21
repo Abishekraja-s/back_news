@@ -242,6 +242,28 @@ export const mapCricLiveScorecard = (json) => {
         role: 'bowler',
       })
     );
+    const yetRaw = inn.yet_to_bat || inn.did_not_bat || inn.still_to_bat || inn.yetToBat || [];
+    const yetToBat = Array.isArray(yetRaw)
+      ? yetRaw.map((p) => (typeof p === 'string' ? p : p?.name || p?.player || '')).filter(Boolean)
+      : typeof yetRaw === 'string'
+        ? yetRaw.split(/[,;]/).map((s) => s.trim()).filter(Boolean)
+        : [];
+    const fallRaw = inn.fall_of_wickets || inn.fallOfWickets || inn.fow || inn.wickets_fallen || [];
+    const fallOfWickets = (Array.isArray(fallRaw) ? fallRaw : []).map((f, fi) =>
+      omitEmpty({
+        id: String(f.id || `fow-${idx}-${fi}`),
+        score: f.score ?? f.runs ?? f.total ?? (f.wicket != null ? `${f.runs || f.score || ''}/${f.wicket}` : undefined),
+        wicket: f.wicket ?? f.w ?? fi + 1,
+        batsman: f.batsman || f.player || f.name || '',
+        overs: f.overs ?? f.over ?? f.ov,
+        text:
+          f.text ||
+          f.label ||
+          (f.batsman || f.player
+            ? `${f.score || f.runs || ''}${f.wicket != null ? `/${f.wicket}` : ''} (${f.batsman || f.player}${f.overs ? `, ${f.overs} overs` : ''})`
+            : ''),
+      })
+    );
     return omitEmpty({
       number: inn.number ?? inn.inning ?? idx + 1,
       team: inn.team || inn.name || inn.batting_team || '',
@@ -255,11 +277,70 @@ export const mapCricLiveScorecard = (json) => {
       batting,
       bowling,
       extras: inn.extras,
-      yetToBat: inn.yet_to_bat || inn.did_not_bat,
+      yetToBat: yetToBat.length ? yetToBat : undefined,
+      fallOfWickets: fallOfWickets.length ? fallOfWickets : undefined,
     });
   });
 
   return { innings };
+};
+
+/** Soft-extract win probability / live performers if provider sends them */
+export const extractCricketExtras = (apiMatch = {}, scorecardRoot = {}) => {
+  const root = apiMatch || {};
+  const sc = scorecardRoot?.data || scorecardRoot || {};
+  const prob =
+    root.win_probability ||
+    root.winProbability ||
+    root.probability ||
+    sc.win_probability ||
+    sc.winProbability ||
+    null;
+  let winProbability = null;
+  if (prob && typeof prob === 'object') {
+    winProbability = omitEmpty({
+      home: prob.home ?? prob.team1 ?? prob.home_pct ?? prob.a,
+      away: prob.away ?? prob.team2 ?? prob.away_pct ?? prob.b,
+      draw: prob.draw ?? prob.tie ?? prob.d,
+      label: prob.label || prob.text || '',
+    });
+    if (!hasValue(winProbability.home) && !hasValue(winProbability.away) && !hasValue(winProbability.draw)) {
+      winProbability = null;
+    }
+  }
+  const battersRaw =
+    root.current_batsmen ||
+    root.currentBatters ||
+    root.batsmen_at_crease ||
+    sc.current_batsmen ||
+    [];
+  const bowlersRaw = root.current_bowlers || root.currentBowlers || sc.current_bowlers || [];
+  const currentBatters = (Array.isArray(battersRaw) ? battersRaw : []).map((b) =>
+    omitEmpty({
+      name: b.name || b.player || b.batsman || '',
+      runs: b.runs ?? b.r,
+      balls: b.balls ?? b.b,
+      strikeRate: b.strike_rate ?? b.sr,
+      onStrike: b.on_strike ?? b.strike,
+    })
+  );
+  const currentBowlers = (Array.isArray(bowlersRaw) ? bowlersRaw : []).map((b) =>
+    omitEmpty({
+      name: b.name || b.player || b.bowler || '',
+      overs: b.overs ?? b.o,
+      maidens: b.maidens ?? b.m,
+      runs: b.runs ?? b.r,
+      wickets: b.wickets ?? b.w,
+      economy: b.economy ?? b.eco,
+    })
+  );
+  return omitEmpty({
+    winProbability,
+    currentBatters: currentBatters.length ? currentBatters : undefined,
+    currentBowlers: currentBowlers.length ? currentBowlers : undefined,
+    toss: root.toss || sc.toss || root.toss_winner,
+    umpires: root.umpires || sc.umpires,
+  });
 };
 
 /** Map commentary / ball-by-ball into overs groups */
@@ -769,6 +850,17 @@ export const buildMatchDetailPayload = async (matchDoc, modeConfig = {}) => {
 
   if (sport === 'cricket' && scorecard) sportBlock.scorecard = scorecard;
   if (sport === 'cricket' && ballByBall) sportBlock.ballByBall = ballByBall;
+  const cricketExtras =
+    sport === 'cricket' ? extractCricketExtras(apiMatch || {}, scorecard || {}) : {};
+  if (sport === 'cricket' && cricketExtras.winProbability) {
+    sportBlock.winProbability = cricketExtras.winProbability;
+  }
+  if (sport === 'cricket' && cricketExtras.currentBatters) {
+    sportBlock.currentBatters = cricketExtras.currentBatters;
+  }
+  if (sport === 'cricket' && cricketExtras.currentBowlers) {
+    sportBlock.currentBowlers = cricketExtras.currentBowlers;
+  }
   if (sport === 'chess' && chess) {
     /* attached below */
   }
@@ -810,7 +902,14 @@ export const buildMatchDetailPayload = async (matchDoc, modeConfig = {}) => {
     football: sport === 'football' ? sportBlock : null,
     basketball: sport === 'basketball' ? sportBlock : null,
     tennis: sport === 'tennis' ? sportBlock : null,
-    cricket: sport === 'cricket' ? { ...sportBlock, scorecard, ballByBall } : null,
+    cricket:
+      sport === 'cricket'
+        ? { ...sportBlock, scorecard, ballByBall, ...cricketExtras }
+        : null,
+    winProbability: cricketExtras.winProbability || null,
+    currentBatters: cricketExtras.currentBatters || null,
+    currentBowlers: cricketExtras.currentBowlers || null,
+    toss: cricketExtras.toss || apiMatch?.toss || null,
     tracker: apiMatch?.tracker || null,
     availability: null,
     apiError: apiError || null,
@@ -849,7 +948,7 @@ export const buildMatchDetailPayload = async (matchDoc, modeConfig = {}) => {
   const payload = {
     match,
     detail,
-    refreshIntervalSeconds: isLiveStatus(mergedStatus) ? 15 : 60,
+    refreshIntervalSeconds: isLiveStatus(mergedStatus) ? 30 : 60,
   };
   PAYLOAD_CACHE.set(payloadKey, {
     value: payload,

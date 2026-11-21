@@ -57,6 +57,8 @@ const articleSchema = new mongoose.Schema(
     isBreaking: { type: Boolean, default: false },
     isLive: { type: Boolean, default: false },
     isMustWatch: { type: Boolean, default: false },
+    /** Manually linked “Must Read” articles (editor picks from recent list) */
+    mustReadArticles: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Article' }],
     audioReader: { type: String, default: '' },
     youtubeVideoLink: { type: String, default: '' },
     socialYoutube: { type: String, default: '' },

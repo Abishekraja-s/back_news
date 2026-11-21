@@ -910,7 +910,7 @@ export const getPublicWidgets = async (req, res, next) => {
     };
 
     const widgetSelect =
-      '_id fingerprint externalId provider sport league tournament competition homeTeam awayTeam homeScore awayScore homeScoreText awayScoreText status statusDetail liveClock startTime venue sourceUrl lastSyncedAt';
+      '_id fingerprint externalId provider sport league tournament competition homeTeam awayTeam homeScore awayScore homeScoreText awayScoreText status statusDetail liveClock startTime venue sourceUrl stats lastSyncedAt lastUpdatedAt';
     const [live, standings] = await Promise.all([
       SportsMatch.find(liveFilter).select(widgetSelect).sort({ lastSyncedAt: -1 }).limit(20).lean(),
       SportsStanding.find({
@@ -977,7 +977,7 @@ export const getPublicList = async (req, res, next) => {
     }
 
     const listSelect =
-      '_id fingerprint externalId provider sport league tournament competition homeTeam awayTeam homeScore awayScore homeScoreText awayScoreText status statusDetail liveClock startTime venue sourceUrl lastSyncedAt isActive isPublished';
+      '_id fingerprint externalId provider sport league tournament competition homeTeam awayTeam homeScore awayScore homeScoreText awayScoreText status statusDetail liveClock startTime venue sourceUrl stats lastSyncedAt lastUpdatedAt isActive isPublished';
     const [matches, total] = await Promise.all([
       SportsMatch.find(filter)
         .select(listSelect)

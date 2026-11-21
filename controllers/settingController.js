@@ -35,6 +35,9 @@ const DEFAULT_SETTINGS = {
   analyticsEnabled: true,
   searchConsoleVerification: '',
   commentsEnabled: true,
+  mailProvider: 'auto',
+  resendApiKey: '',
+  brevoApiKey: '',
   smtpEnabled: false,
   smtpHost: '',
   smtpPort: 587,
@@ -127,8 +130,13 @@ const buildSettingsResult = (stored = []) => {
   result.smtpEnabled = result.smtpEnabled === true || result.smtpEnabled === 'true';
   result.smtpSecure = result.smtpSecure === true || result.smtpSecure === 'true';
   result.smtpPort = Number(result.smtpPort) || 587;
+  result.mailProvider = String(result.mailProvider || 'auto').toLowerCase();
   result.smtpPasswordSet = Boolean(result.smtpPassword);
+  result.resendApiKeySet = Boolean(result.resendApiKey);
+  result.brevoApiKeySet = Boolean(result.brevoApiKey);
   delete result.smtpPassword;
+  delete result.resendApiKey;
+  delete result.brevoApiKey;
 
   return result;
 };
@@ -172,14 +180,33 @@ export const updateSettings = async (req, res, next) => {
       updates.smtpPort = Number(updates.smtpPort) || 587;
     }
 
-    // Keep existing password when admin leaves the field blank
+    // Keep existing secrets when admin leaves fields blank
     if (
       Object.prototype.hasOwnProperty.call(updates, 'smtpPassword')
       && String(updates.smtpPassword || '').trim() === ''
     ) {
       delete updates.smtpPassword;
     }
+    if (
+      Object.prototype.hasOwnProperty.call(updates, 'resendApiKey')
+      && String(updates.resendApiKey || '').trim() === ''
+    ) {
+      delete updates.resendApiKey;
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(updates, 'brevoApiKey')
+      && String(updates.brevoApiKey || '').trim() === ''
+    ) {
+      delete updates.brevoApiKey;
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, 'mailProvider')) {
+      const allowed = new Set(['auto', 'resend', 'brevo', 'smtp']);
+      const next = String(updates.mailProvider || 'auto').toLowerCase();
+      updates.mailProvider = allowed.has(next) ? next : 'auto';
+    }
     delete updates.smtpPasswordSet;
+    delete updates.resendApiKeySet;
+    delete updates.brevoApiKeySet;
 
     for (const [key, value] of Object.entries(updates)) {
       if (BRAND_SETTING_KEYS.includes(key)) continue;
@@ -196,11 +223,12 @@ export const updateSettings = async (req, res, next) => {
         }
         continue;
       }
-      const group = key.startsWith('smtp')
-        ? 'email'
-        : key.startsWith('google') || key === 'analyticsEnabled'
-          ? 'analytics'
-          : 'general';
+      const group =
+        key.startsWith('smtp') || key === 'mailProvider' || key === 'resendApiKey' || key === 'brevoApiKey'
+          ? 'email'
+          : key.startsWith('google') || key === 'analyticsEnabled'
+            ? 'analytics'
+            : 'general';
       await Setting.findOneAndUpdate(
         { key },
         { key, value, group },
